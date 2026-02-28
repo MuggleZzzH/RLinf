@@ -104,6 +104,7 @@ env:
     video_cfg:
       save_video: True
       info_on_video: True
+      fps: 20
       video_base_dir: ${runner.logger.log_path}/video/eval
 
 rollout:

@@ -162,6 +162,8 @@ class IsaaclabBaseEnv(gym.Env):
         # chunk_actions: [num_envs, chunk_step, action_dim]
         chunk_size = chunk_actions.shape[1]
 
+        obs_list = []
+        infos_list = []
         chunk_rewards = []
 
         raw_chunk_terminations = []
@@ -171,6 +173,8 @@ class IsaaclabBaseEnv(gym.Env):
             extracted_obs, step_reward, terminations, truncations, infos = self.step(
                 actions, auto_reset=False
             )
+            obs_list.append(extracted_obs)
+            infos_list.append(infos)
 
             chunk_rewards.append(step_reward)
             raw_chunk_terminations.append(terminations)
@@ -192,6 +196,10 @@ class IsaaclabBaseEnv(gym.Env):
             extracted_obs, infos = self._handle_auto_reset(
                 past_dones, extracted_obs, infos
             )
+            if obs_list:
+                obs_list[-1] = extracted_obs
+            if infos_list:
+                infos_list[-1] = infos
 
         if self.auto_reset or self.ignore_terminations:
             chunk_terminations = torch.zeros_like(raw_chunk_terminations).to(
@@ -205,11 +213,11 @@ class IsaaclabBaseEnv(gym.Env):
             chunk_terminations = raw_chunk_terminations.clone()
             chunk_truncations = raw_chunk_truncations.clone()
         return (
-            extracted_obs,
+            obs_list,
             chunk_rewards,
             chunk_terminations,
             chunk_truncations,
-            infos,
+            infos_list,
         )
 
     def _handle_auto_reset(self, dones, _final_obs, infos):

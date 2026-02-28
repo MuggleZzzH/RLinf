@@ -23,7 +23,7 @@ export HYDRA_FULL_ERROR=1
 
 CONFIG_NAME="${CONFIG_NAME:-isaaclab_stack_cube_openpi_eval}"
 RUN_NAME="${RUN_NAME:-isaaclab_openpi_eval}"
-RESULT_ROOT="${RESULT_ROOT:-${REPO_PATH}/result}"
+RESULT_ROOT="${RESULT_ROOT:-${REPO_PATH}/result/isaaclab_openpi/eval}"
 
 # Required: OpenPI model directory with safetensors/norm stats.
 OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-/mnt/project_rlinf_hs/Jiahao/RLinf/checkpoints/torch/pi0_base}"
