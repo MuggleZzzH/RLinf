@@ -36,9 +36,24 @@ WANDB_PROJECT="${WANDB_PROJECT:-rlinf}"
 WANDB_EXP_NAME="${WANDB_EXP_NAME:-${RUN_NAME}}"
 
 TOTAL_NUM_ENVS="${TOTAL_NUM_ENVS:-32}"
-MAX_EPISODE_STEPS="${MAX_EPISODE_STEPS:-448}"
+MAX_EPISODE_STEPS="${MAX_EPISODE_STEPS:-440}"
 EVAL_ROLLOUT_EPOCH="${EVAL_ROLLOUT_EPOCH:-3}"
 SAVE_VIDEO="${SAVE_VIDEO:-true}"
+ACTION_CHUNK="${ACTION_CHUNK:-10}"
+
+if ! [[ "${MAX_EPISODE_STEPS}" =~ ^[0-9]+$ && "${ACTION_CHUNK}" =~ ^[0-9]+$ ]]; then
+    echo "MAX_EPISODE_STEPS and ACTION_CHUNK must be integers."
+    exit 1
+fi
+if [ "${ACTION_CHUNK}" -le 0 ]; then
+    echo "ACTION_CHUNK must be > 0."
+    exit 1
+fi
+if [ $((MAX_EPISODE_STEPS % ACTION_CHUNK)) -ne 0 ]; then
+    echo "MAX_EPISODE_STEPS (${MAX_EPISODE_STEPS}) must be divisible by ACTION_CHUNK (${ACTION_CHUNK})."
+    echo "Example: ACTION_CHUNK=10 with MAX_EPISODE_STEPS=440 or 450."
+    exit 1
+fi
 
 resolve_ckpt_path() {
     local input_path="$1"
