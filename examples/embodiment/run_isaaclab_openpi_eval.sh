@@ -5,6 +5,16 @@ set -euo pipefail
 EMBODIED_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_PATH="$(dirname "$(dirname "$EMBODIED_PATH")")"
 SRC_FILE="${EMBODIED_PATH}/eval_embodied_agent.py"
+RUNTIME_SETUP_FILE="${REPO_PATH}/examples/common/setup_isaaclab_runtime.sh"
+
+if [ -f "${RUNTIME_SETUP_FILE}" ]; then
+    # shellcheck disable=SC1090
+    source "${RUNTIME_SETUP_FILE}"
+    setup_isaaclab_runtime "${REPO_PATH}"
+else
+    echo "Runtime setup file not found: ${RUNTIME_SETUP_FILE}"
+    exit 1
+fi
 
 export REPO_PATH
 export EMBODIED_PATH
