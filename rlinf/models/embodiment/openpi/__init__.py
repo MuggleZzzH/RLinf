@@ -13,9 +13,38 @@
 # limitations under the License.
 # openpi model configs
 
+import logging
 import os
 
 from omegaconf import DictConfig
+
+
+def _filter_isaaclab_norm_stats(config_name: str, norm_stats):
+    """Keep only policy-relevant stats for IsaacLab to avoid selector mismatches."""
+    if config_name != "pi0_isaaclab" or not isinstance(norm_stats, dict):
+        return norm_stats
+
+    allow_prefixes = (
+        "observation.state",
+        "observation/state",
+        "action",
+        "actions",
+    )
+    filtered = {
+        key: value
+        for key, value in norm_stats.items()
+        if isinstance(key, str) and key.startswith(allow_prefixes)
+    }
+    removed_keys = [
+        key for key in norm_stats.keys() if key not in filtered and isinstance(key, str)
+    ]
+    if removed_keys:
+        logging.info(
+            "Filtered non-policy norm stats keys for %s: %s",
+            config_name,
+            ", ".join(sorted(removed_keys)),
+        )
+    return filtered if filtered else norm_stats
 
 
 def get_model(cfg: DictConfig, torch_dtype=None):
@@ -70,6 +99,7 @@ def get_model(cfg: DictConfig, torch_dtype=None):
         if data_config.asset_id is None:
             raise ValueError("Asset id is required to load norm stats.")
         norm_stats = _checkpoints.load_norm_stats(checkpoint_dir, data_config.asset_id)
+    norm_stats = _filter_isaaclab_norm_stats(config_name, norm_stats)
     # wrappers
     repack_transforms = transforms.Group()
     default_prompt = None
