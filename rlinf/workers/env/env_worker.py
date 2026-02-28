@@ -188,8 +188,14 @@ class EnvWorker(Worker):
         )
         if isinstance(obs_list, (list, tuple)):
             extracted_obs = obs_list[-1] if obs_list else None
+        else:
+            extracted_obs = obs_list
         if isinstance(infos_list, (list, tuple)):
-            infos = infos_list[-1] if infos_list else None
+            infos = infos_list[-1] if infos_list else {}
+        else:
+            infos = infos_list if infos_list is not None else {}
+        if not isinstance(infos, dict):
+            infos = {}
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
         if not self.cfg.env.train.auto_reset:
             if self.cfg.env.train.ignore_terminations:
@@ -253,8 +259,14 @@ class EnvWorker(Worker):
         )
         if isinstance(obs_list, (list, tuple)):
             extracted_obs = obs_list[-1] if obs_list else None
+        else:
+            extracted_obs = obs_list
         if isinstance(infos_list, (list, tuple)):
-            infos = infos_list[-1] if infos_list else None
+            infos = infos_list[-1] if infos_list else {}
+        else:
+            infos = infos_list if infos_list is not None else {}
+        if not isinstance(infos, dict):
+            infos = {}
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
 
         if chunk_dones.any():
