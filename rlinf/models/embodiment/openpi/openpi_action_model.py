@@ -308,9 +308,16 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
                 and "state" not in sample["observation"]
             ):
                 sample["observation"]["state"] = sample["state"]
+            if "state" in sample:
+                # Flat key aliases used by some norm-stat selectors.
+                sample.setdefault("observation.state", sample["state"])
+                sample.setdefault("observation/state", sample["state"])
 
             if "actions" in sample and "action" not in sample:
                 sample["action"] = sample["actions"]
+            if "actions" in sample:
+                # Flat key alias for action selectors.
+                sample.setdefault("actions", sample["actions"])
 
             sample = self._output_transform(sample)
             if "actions" not in sample and "action" in sample:
