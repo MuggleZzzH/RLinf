@@ -39,7 +39,6 @@ TOTAL_NUM_ENVS="${TOTAL_NUM_ENVS:-8}"
 MAX_EPISODE_STEPS="${MAX_EPISODE_STEPS:-350}"
 EVAL_ROLLOUT_EPOCH="${EVAL_ROLLOUT_EPOCH:-1}"
 SAVE_VIDEO="${SAVE_VIDEO:-true}"
-VIDEO_ASYNC_SAVE="${VIDEO_ASYNC_SAVE:-false}"
 
 resolve_ckpt_path() {
     local input_path="$1"
@@ -150,7 +149,6 @@ CMD=(
     "env.eval.max_steps_per_rollout_epoch=${MAX_EPISODE_STEPS}"
     "algorithm.eval_rollout_epoch=${EVAL_ROLLOUT_EPOCH}"
     "env.eval.video_cfg.save_video=${SAVE_VIDEO}"
-    "env.eval.video_cfg.async_save=${VIDEO_ASYNC_SAVE}"
 )
 
 echo "Running command:" | tee "${LOG_FILE}"

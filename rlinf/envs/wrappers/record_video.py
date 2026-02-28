@@ -341,16 +341,7 @@ class RecordVideo(gym.Wrapper):
         frames = list(self.render_images)
         self.render_images = []
         self.video_cnt += 1
-        async_save = True
-        if hasattr(self.video_cfg, "get"):
-            async_save = bool(self.video_cfg.get("async_save", True))
-        elif hasattr(self.video_cfg, "async_save"):
-            async_save = bool(self.video_cfg.async_save)
-
-        if async_save:
-            self._submit_save(frames, mp4_path)
-        else:
-            self._save_video(frames, mp4_path)
+        self._submit_save(frames, mp4_path)
 
     def _submit_save(self, frames: list[np.ndarray], mp4_path: str) -> None:
         """Submit a background job to save the video."""
