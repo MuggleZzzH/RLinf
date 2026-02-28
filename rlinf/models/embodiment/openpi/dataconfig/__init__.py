@@ -121,7 +121,7 @@ _CONFIGS = [
         name="pi0_isaaclab",
         model=pi0_config.Pi0Config(action_horizon=10),
         data=LeRobotIsaaclabDataConfig(
-            repo_id="RLinf/generated_simdata_full",
+            repo_id="generated_simdata_full",
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_isaaclab/assets"),
             extra_delta_transform=False,

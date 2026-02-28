@@ -2,6 +2,7 @@ defaults:
   - model/pi0@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
+  - _self_
 
 hydra:
   run:
@@ -31,7 +32,8 @@ runner:
   resume_dir: null
 
 data:
-  train_data_paths: "/path/to/isaaclab_lerobot_data"
+  # HF_LEROBOT_HOME; should be the parent directory of generated_simdata_full/
+  train_data_paths: "/path/to/isaaclab_lerobot_home"
 
 algorithm:
   adv_type: gae

@@ -19,6 +19,7 @@ RESULT_ROOT="${RESULT_ROOT:-${REPO_PATH}/result}"
 # Required: OpenPI base/SFT model directory (contains safetensors + norm stats)
 OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-/mnt/project_rlinf_hs/Jiahao/RLinf/checkpoints/torch/pi0_base}"
 DATASET_PATH="${DATASET_PATH:-/mnt/qiyuan/zhy/isaaclab_data/generated_simdata_full}"
+DATASET_REPO_ID="${DATASET_REPO_ID:-generated_simdata_full}"
 
 # Optional: resume from RLinf SFT checkpoint directory: .../checkpoints/global_step_x/actor
 RESUME_DIR="${RESUME_DIR:-null}"
@@ -69,8 +70,33 @@ if [ -z "${OPENPI_MODEL_DIR_RESOLVED}" ] || [ ! -d "${OPENPI_MODEL_DIR_RESOLVED}
     exit 1
 fi
 
-if [ ! -d "${DATASET_PATH}" ]; then
+resolve_lerobot_home() {
+    local input_dir="$1"
+    if [ ! -d "${input_dir}" ]; then
+        echo ""
+        return
+    fi
+
+    if [ -f "${input_dir}/meta/info.json" ]; then
+        dirname "${input_dir}"
+        return
+    fi
+
+    echo "${input_dir}"
+}
+
+LEROBOT_HOME="$(resolve_lerobot_home "${DATASET_PATH}")"
+if [ -z "${LEROBOT_HOME}" ] || [ ! -d "${LEROBOT_HOME}" ]; then
     echo "DATASET_PATH does not exist: ${DATASET_PATH}"
+    exit 1
+fi
+
+EXPECTED_META_PATH="${LEROBOT_HOME}/${DATASET_REPO_ID}/meta/info.json"
+if [ ! -f "${EXPECTED_META_PATH}" ]; then
+    echo "LeRobot metadata not found: ${EXPECTED_META_PATH}"
+    echo "Tip: set DATASET_PATH to either:"
+    echo "  1) dataset leaf dir containing meta/info.json; or"
+    echo "  2) HF_LEROBOT_HOME parent dir containing ${DATASET_REPO_ID}/meta/info.json."
     exit 1
 fi
 
@@ -89,7 +115,7 @@ CMD=(
     python "${SRC_FILE}"
     --config-path "${SFT_PATH}/config"
     --config-name "${CONFIG_NAME}"
-    "data.train_data_paths=${DATASET_PATH}"
+    "data.train_data_paths=${LEROBOT_HOME}"
     "actor.model.model_path=${OPENPI_MODEL_DIR_RESOLVED}"
     "runner.logger.log_path=${LOG_DIR}"
     "runner.logger.project_name=${WANDB_PROJECT}"
