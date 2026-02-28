@@ -14,17 +14,33 @@ setup_isaaclab_runtime() {
     local conda_setup="${ISAACLAB_CONDA_SETUP:-/mnt/qiyuan/zhy/nv_rlinf/IsaacLab/_isaac_sim/setup_conda_env.sh}"
     local runtime_setup="${ISAACLAB_RUNTIME_SETUP:-/mnt/project_rlinf_hs/Jiahao/IsaacLab配置计划/tools/run_env.sh}"
 
-    if [ -f "${conda_setup}" ]; then
+    source_with_relaxed_nounset() {
+        local script_path="$1"
+        local had_nounset=0
+        case "$-" in
+            *u*)
+                had_nounset=1
+                set +u
+                ;;
+        esac
         # shellcheck disable=SC1090
-        source "${conda_setup}"
+        source "${script_path}"
+        local rc=$?
+        if [ "${had_nounset}" -eq 1 ]; then
+            set -u
+        fi
+        return "${rc}"
+    }
+
+    if [ -f "${conda_setup}" ]; then
+        source_with_relaxed_nounset "${conda_setup}"
         echo "[env-setup] sourced ISAACLAB_CONDA_SETUP: ${conda_setup}"
     else
         echo "[env-setup] ISAACLAB_CONDA_SETUP not found, skip: ${conda_setup}"
     fi
 
     if [ -f "${runtime_setup}" ]; then
-        # shellcheck disable=SC1090
-        source "${runtime_setup}"
+        source_with_relaxed_nounset "${runtime_setup}"
         echo "[env-setup] sourced ISAACLAB_RUNTIME_SETUP: ${runtime_setup}"
     else
         echo "[env-setup] ISAACLAB_RUNTIME_SETUP not found, skip: ${runtime_setup}"
@@ -59,4 +75,3 @@ setup_isaaclab_runtime() {
         return 1
     fi
 }
-
