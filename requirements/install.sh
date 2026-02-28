@@ -437,6 +437,14 @@ install_openpi_model() {
             uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
             install_flash_attn
             ;;
+        isaaclab)
+            create_and_sync_venv
+            install_common_embodied_deps
+            install_isaaclab_env
+            uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/openpi
+            # Torch can be modified by IsaacLab installation, install flash-attn afterwards.
+            install_flash_attn
+            ;;
         metaworld)
             create_and_sync_venv
             install_common_embodied_deps

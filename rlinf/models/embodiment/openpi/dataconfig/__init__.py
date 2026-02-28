@@ -44,6 +44,9 @@ from rlinf.models.embodiment.openpi.dataconfig.gsenv_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.libero_dataconfig import (
     LeRobotLiberoDataConfig,
 )
+from rlinf.models.embodiment.openpi.dataconfig.isaaclab_dataconfig import (
+    LeRobotIsaaclabDataConfig,
+)
 from rlinf.models.embodiment.openpi.dataconfig.maniskill_dataconfig import (
     LeRobotManiSkillDataConfig,
 )
@@ -113,6 +116,21 @@ _CONFIGS = [
         num_train_steps=200,  # 1_000, #30_000
         log_interval=5,  # 25,
         save_interval=50,  # 200,
+    ),
+    TrainConfig(
+        name="pi0_isaaclab",
+        model=pi0_config.Pi0Config(action_horizon=10),
+        data=LeRobotIsaaclabDataConfig(
+            repo_id="RLinf/generated_simdata_full",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_isaaclab/assets"),
+            extra_delta_transform=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "checkpoints/jax/pi0_base/params"
+        ),
+        pytorch_weight_path="checkpoints/torch/pi0_base",
+        num_train_steps=30_000,
     ),
     TrainConfig(
         name="pi05_maniskill",

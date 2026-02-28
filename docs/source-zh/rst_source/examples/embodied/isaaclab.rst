@@ -216,6 +216,18 @@ Isaac Sim 下载
 
    bash examples/embodiment/eval_embodiment.sh isaaclab_franka_stack_cube_ppo_gr00t
 
+在 IsaacLab 环境中使用 PPO 训练 OpenPI：
+
+.. code:: bash
+
+   bash examples/embodiment/run_embodiment.sh isaaclab_stack_cube_ppo_openpi
+
+在 IsaacLab 环境中评估 OpenPI：
+
+.. code:: bash
+
+   bash examples/embodiment/eval_embodiment.sh isaaclab_stack_cube_openpi_eval
+
 可视化与结果
 ------------
 

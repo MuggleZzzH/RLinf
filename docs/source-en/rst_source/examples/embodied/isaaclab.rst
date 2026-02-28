@@ -220,6 +220,18 @@ To evaluate gr00t in the IsaacLab environment, run:
 
    bash examples/embodiment/eval_embodiment.sh isaaclab_franka_stack_cube_ppo_gr00t
 
+To train OpenPI with PPO in the IsaacLab environment, run:
+
+.. code:: bash
+
+   bash examples/embodiment/run_embodiment.sh isaaclab_stack_cube_ppo_openpi
+
+To evaluate OpenPI in the IsaacLab environment, run:
+
+.. code:: bash
+
+   bash examples/embodiment/eval_embodiment.sh isaaclab_stack_cube_openpi_eval
+
 Visualization and Results
 -------------------------
 
