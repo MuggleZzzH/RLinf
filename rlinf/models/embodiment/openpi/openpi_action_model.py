@@ -294,7 +294,27 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         transformed_samples = []
         for i in range(batch_size):
             sample = jax.tree.map(lambda x: np.asarray(x[i].detach().cpu()), outputs)
+            # Some norm stats are keyed by `observation.state` / `action` while
+            # runtime inference may provide `state` / `actions`. Add aliases so
+            # OpenPI transforms can match either selector style.
+            if "state" in sample and (
+                "observation" not in sample
+                or not isinstance(sample.get("observation"), dict)
+            ):
+                sample["observation"] = {"state": sample["state"]}
+            elif (
+                "state" in sample
+                and isinstance(sample.get("observation"), dict)
+                and "state" not in sample["observation"]
+            ):
+                sample["observation"]["state"] = sample["state"]
+
+            if "actions" in sample and "action" not in sample:
+                sample["action"] = sample["actions"]
+
             sample = self._output_transform(sample)
+            if "actions" not in sample and "action" in sample:
+                sample["actions"] = sample["action"]
             transformed_samples.append(sample)
         # recombine
         outputs = jax.tree.map(
