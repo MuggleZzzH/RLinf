@@ -25,8 +25,9 @@ CONFIG_NAME="${CONFIG_NAME:-isaaclab_stack_cube_ppo_openpi}"
 RUN_NAME="${RUN_NAME:-isaaclab_openpi_rl}"
 RESULT_ROOT="${RESULT_ROOT:-${REPO_PATH}/result/isaaclab_openpi/rl}"
 
-# Required: OpenPI model directory with safetensors/norm stats.
-OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-/mnt/project_rlinf_hs/Jiahao/RLinf/checkpoints/torch/pi0_base}"
+# OpenPI model directory with safetensors/norm stats.
+# If set to "auto" (default), infer from CKPT_INPUT first.
+OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-auto}"
 
 # Optional: RLinf .pt checkpoint file or directory containing full_weigths.pt/full_weights.pt.
 CKPT_INPUT="${CKPT_INPUT:-/mnt/project_rlinf_hs/Jiahao/results/isaaclab_sft/isaaclab_stack_cube_sft/checkpoints/global_step_30000/actor/model_state_dict}"
@@ -73,13 +74,6 @@ resolve_ckpt_path() {
     echo "${input_path}"
 }
 
-if [ -z "${OPENPI_MODEL_DIR}" ]; then
-    echo "OPENPI_MODEL_DIR is required."
-    echo "Example:"
-    echo "  OPENPI_MODEL_DIR=/path/to/openpi_model_dir bash examples/embodiment/run_isaaclab_openpi_rl.sh"
-    exit 1
-fi
-
 resolve_openpi_model_dir() {
     local input_dir="$1"
     if [ ! -d "${input_dir}" ]; then
@@ -109,10 +103,56 @@ resolve_openpi_model_dir() {
     echo "${input_dir}"
 }
 
-OPENPI_MODEL_DIR_RESOLVED="$(resolve_openpi_model_dir "${OPENPI_MODEL_DIR}")"
+has_norm_stats() {
+    local dir="$1"
+    if [ -f "${dir}/generated_simdata_full/norm_stats.json" ] || [ -f "${dir}/physical-intelligence/isaaclab_stack_cube/norm_stats.json" ]; then
+        return 0
+    fi
+    if find "${dir}" -maxdepth 4 -type f -name "norm_stats.json" | head -n 1 | grep -q "."; then
+        return 0
+    fi
+    return 1
+}
+
+infer_openpi_model_dir_from_ckpt() {
+    local input_path="$1"
+    local candidate_dir=""
+    if [ -z "${input_path}" ] || [ "${input_path}" = "null" ]; then
+        echo ""
+        return
+    fi
+    if [ -f "${input_path}" ]; then
+        candidate_dir="$(dirname "${input_path}")"
+    elif [ -d "${input_path}" ]; then
+        candidate_dir="${input_path}"
+    else
+        echo ""
+        return
+    fi
+    resolve_openpi_model_dir "${candidate_dir}"
+}
+
+if [ -z "${OPENPI_MODEL_DIR}" ] || [ "${OPENPI_MODEL_DIR}" = "auto" ]; then
+    OPENPI_MODEL_DIR_RESOLVED="$(infer_openpi_model_dir_from_ckpt "${CKPT_INPUT}")"
+else
+    OPENPI_MODEL_DIR_RESOLVED="$(resolve_openpi_model_dir "${OPENPI_MODEL_DIR}")"
+fi
+
 if [ -z "${OPENPI_MODEL_DIR_RESOLVED}" ] || [ ! -d "${OPENPI_MODEL_DIR_RESOLVED}" ]; then
     echo "OPENPI_MODEL_DIR does not exist: ${OPENPI_MODEL_DIR}"
+    echo "Tip: set OPENPI_MODEL_DIR explicitly, or set CKPT_INPUT to a directory containing safetensors + norm_stats."
     exit 1
+fi
+
+NORM_PATH="$(find "${OPENPI_MODEL_DIR_RESOLVED}" -maxdepth 4 -type f -name "norm_stats.json" | head -n 1 || true)"
+if has_norm_stats "${OPENPI_MODEL_DIR_RESOLVED}"; then
+    echo "Using OpenPI model dir: ${OPENPI_MODEL_DIR_RESOLVED}"
+    if [ -n "${NORM_PATH}" ]; then
+        echo "Detected norm stats: ${NORM_PATH}"
+    fi
+else
+    echo "Warning: no norm_stats.json found under ${OPENPI_MODEL_DIR_RESOLVED}."
+    echo "This may cause normalization mismatch during RL training/eval."
 fi
 
 CKPT_PATH="$(resolve_ckpt_path "${CKPT_INPUT}")"
