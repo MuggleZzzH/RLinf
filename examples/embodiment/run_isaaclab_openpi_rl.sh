@@ -16,10 +16,10 @@ RUN_NAME="${RUN_NAME:-isaaclab_openpi_rl}"
 RESULT_ROOT="${RESULT_ROOT:-${REPO_PATH}/result}"
 
 # Required: OpenPI model directory with safetensors/norm stats.
-OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-/mnt/project_rlinf_hs/Jiahao/results/isaaclab_sft/isaaclab_stack_cube_sft/checkpoints/global_step_30000/actor/model_state_dict/generated_simdata_full}"
+OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-/mnt/project_rlinf_hs/Jiahao/RLinf/checkpoints/torch/pi0_base}"
 
 # Optional: RLinf .pt checkpoint file or directory containing full_weigths.pt/full_weights.pt.
-CKPT_INPUT="${CKPT_INPUT:-null}"
+CKPT_INPUT="${CKPT_INPUT:-/mnt/project_rlinf_hs/Jiahao/results/isaaclab_sft/isaaclab_stack_cube_sft/checkpoints/global_step_30000/actor/model_state_dict}"
 
 WANDB_ENABLE="${WANDB_ENABLE:-1}"
 WANDB_PROJECT="${WANDB_PROJECT:-rlinf}"
