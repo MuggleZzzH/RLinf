@@ -341,7 +341,16 @@ class RecordVideo(gym.Wrapper):
         frames = list(self.render_images)
         self.render_images = []
         self.video_cnt += 1
-        self._submit_save(frames, mp4_path)
+        async_save = True
+        if hasattr(self.video_cfg, "get"):
+            async_save = bool(self.video_cfg.get("async_save", True))
+        elif hasattr(self.video_cfg, "async_save"):
+            async_save = bool(self.video_cfg.async_save)
+
+        if async_save:
+            self._submit_save(frames, mp4_path)
+        else:
+            self._save_video(frames, mp4_path)
 
     def _submit_save(self, frames: list[np.ndarray], mp4_path: str) -> None:
         """Submit a background job to save the video."""
@@ -366,8 +375,15 @@ class RecordVideo(gym.Wrapper):
         """Remove finished futures to avoid unbounded growth."""
         self._save_futures = [f for f in self._save_futures if not f.done()]
 
+    def wait_pending_saves(self) -> None:
+        """Block until all background video writes are complete."""
+        for future in self._save_futures:
+            future.result()
+        self._save_futures = []
+
     def close(self):
         """Wait for pending video writes before closing."""
+        self.wait_pending_saves()
         self._executor.shutdown(wait=True)
         self._save_futures = []
         return super().close()
