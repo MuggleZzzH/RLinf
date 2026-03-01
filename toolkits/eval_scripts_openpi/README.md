@@ -121,3 +121,32 @@ python toolkits/eval_scripts_openpi/calvin_eval.py \
     --video_temp_subsample 10
 ```
 
+### IsaacLab SFT Offline Fitting (`isaaclab_sft_fit_eval.py`)
+
+This script evaluates fitting quality on the full IsaacLab LeRobot dataset:
+- input: dataset image + language + state
+- output: predicted action vs dataset action
+- artifacts: `summary_metrics.json`, per-dim CSV, residual/scatter/MAE plots
+
+**Recommended launcher (auto runtime setup):**
+```bash
+bash examples/sft/run_isaaclab_sft_fit_eval_openpi.sh
+```
+
+Key environment variables:
+- `OPENPI_MODEL_DIR`: model dir containing `*.safetensors` and `norm_stats.json`
+- `DATASET_PATH`: dataset leaf dir or HF_LEROBOT_HOME parent
+- `DATASET_REPO_ID`: default `generated_simdata_full`
+- `CKPT_INPUT`: optional `.pt` checkpoint or directory containing `full_weights.pt`
+- `MAX_BATCHES=-1`: full dataset traversal (default)
+
+Direct script example:
+```bash
+python toolkits/eval_scripts_openpi/isaaclab_sft_fit_eval.py \
+  --model-path /path/to/model_state_dict \
+  --dataset-home /path/to/hf_lerobot_home \
+  --repo-id generated_simdata_full \
+  --config-name pi0_isaaclab \
+  --max-batches -1 \
+  --output-dir result/isaaclab_openpi/sft_fit_eval
+```
