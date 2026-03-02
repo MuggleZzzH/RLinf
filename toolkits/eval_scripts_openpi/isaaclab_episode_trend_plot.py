@@ -462,6 +462,61 @@ def _plot_episode_overview(
     }
 
 
+def _plot_episode_trajectory_lines(
+    episode_id: int,
+    true_actions: np.ndarray,
+    pred_actions: np.ndarray,
+    out_path: pathlib.Path,
+) -> None:
+    dim = true_actions.shape[1]
+    ncols = 2
+    nrows = int(math.ceil(dim / float(ncols)))
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        figsize=(14, max(3.2 * nrows, 6.0)),
+        sharex=True,
+    )
+    axes_arr = np.asarray(axes).reshape(-1)
+    x = np.arange(true_actions.shape[0])
+
+    for d in range(dim):
+        ax = axes_arr[d]
+        ax.plot(
+            x,
+            true_actions[:, d],
+            color="#1d3557",
+            linewidth=1.6,
+            alpha=0.95,
+            label="GT",
+        )
+        ax.plot(
+            x,
+            pred_actions[:, d],
+            color="#e63946",
+            linewidth=1.2,
+            alpha=0.85,
+            label="Pred",
+        )
+        ax.set_title(f"dim {d}")
+        ax.grid(alpha=0.3)
+        if d % ncols == 0:
+            ax.set_ylabel("Action value")
+
+    for d in range(dim, len(axes_arr)):
+        axes_arr[d].axis("off")
+
+    for ax in axes_arr:
+        ax.set_xlabel("Frame index")
+
+    handles, labels = axes_arr[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False)
+    fig.suptitle(f"Episode {episode_id}: full trajectory GT vs Pred by action dimension")
+    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.96])
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+
+
 def _plot_episode_summary(
     per_episode: list[dict[str, Any]],
     out_path: pathlib.Path,
@@ -563,6 +618,7 @@ def main() -> None:
             action_dim=args.action_dim,
         )
         out_path = output_dir / f"episode_{episode_id:06d}_trend.png"
+        line_out_path = output_dir / f"episode_{episode_id:06d}_full_lines.png"
         episode_metrics = _plot_episode_overview(
             episode_id=episode_id,
             true_actions=true_actions,
@@ -570,6 +626,13 @@ def main() -> None:
             out_path=out_path,
             smooth_window=args.smooth_window,
         )
+        _plot_episode_trajectory_lines(
+            episode_id=episode_id,
+            true_actions=true_actions,
+            pred_actions=pred_actions,
+            out_path=line_out_path,
+        )
+        episode_metrics["trajectory_figure"] = line_out_path.name
         episode_results.append(episode_metrics)
         pbar.set_postfix(
             {
