@@ -365,10 +365,15 @@ def _predict_episode_first_step_actions(
     preds: list[np.ndarray] = []
     for start in range(0, total, infer_batch_size):
         end = min(start + infer_batch_size, total)
+        # OpenPI action model expects tensor inputs in env_obs.
         env_obs = {
-            "main_images": table_frames[start:end],
-            "wrist_images": wrist_frames[start:end],
-            "states": states[start:end],
+            "main_images": torch.from_numpy(
+                np.ascontiguousarray(table_frames[start:end])
+            ),
+            "wrist_images": torch.from_numpy(
+                np.ascontiguousarray(wrist_frames[start:end])
+            ),
+            "states": torch.from_numpy(np.ascontiguousarray(states[start:end])),
             "task_descriptions": [prompt] * (end - start),
         }
         with torch.no_grad():
