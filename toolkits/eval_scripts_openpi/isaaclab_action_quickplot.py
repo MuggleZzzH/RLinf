@@ -167,6 +167,17 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional run name; auto timestamp if empty.",
     )
+    parser.add_argument(
+        "--random-sample",
+        action="store_true",
+        help="Randomly sample examples from visited stream (without replacement).",
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=42,
+        help="Random seed used when --random-sample is enabled.",
+    )
     return parser.parse_args()
 
 
@@ -391,16 +402,28 @@ def main() -> None:
 
     if args.num_samples <= 0:
         raise ValueError("--num-samples must be > 0.")
+    if args.random_sample and args.max_batches <= 0:
+        raise ValueError(
+            "--random-sample requires a positive --max-batches to avoid unbounded traversal."
+        )
 
+    rng = np.random.default_rng(args.random_seed)
     collected: list[dict[str, Any]] = []
+    sampled_entries: list[dict[str, Any]] = []
     seen_samples = 0
+    seen_candidates_after_offset = 0
     processed_batches = 0
+    stop_collect = False
 
     progress_total = args.max_batches if args.max_batches > 0 else None
     pbar = tqdm(total=progress_total, desc="Collecting samples", dynamic_ncols=True)
 
     iterator = iter(data_loader)
-    while len(collected) < args.num_samples:
+    while True:
+        if not args.random_sample and len(sampled_entries) >= args.num_samples:
+            break
+        if stop_collect:
+            break
         if args.max_batches > 0 and processed_batches >= args.max_batches:
             break
         try:
@@ -452,16 +475,24 @@ def main() -> None:
                 seen_samples += 1
                 continue
             sample_id = seen_samples
-            fig_path = output_dir / f"sample_{sample_id:06d}_action_compare.png"
-            sample_metrics = _plot_single_sample(
-                true_actions=true_env[i],
-                pred_actions=pred_env[i],
-                sample_id=sample_id,
-                output_path=fig_path,
-            )
-            collected.append(sample_metrics)
+            entry = {
+                "sample_id": sample_id,
+                "true_actions": true_env[i].copy(),
+                "pred_actions": pred_env[i].copy(),
+            }
+            if args.random_sample:
+                seen_candidates_after_offset += 1
+                if len(sampled_entries) < args.num_samples:
+                    sampled_entries.append(entry)
+                else:
+                    replace_idx = int(rng.integers(0, seen_candidates_after_offset))
+                    if replace_idx < args.num_samples:
+                        sampled_entries[replace_idx] = entry
+            else:
+                sampled_entries.append(entry)
             seen_samples += 1
-            if len(collected) >= args.num_samples:
+            if (not args.random_sample) and len(sampled_entries) >= args.num_samples:
+                stop_collect = True
                 break
 
         processed_batches += 1
@@ -469,10 +500,22 @@ def main() -> None:
 
     pbar.close()
 
-    if not collected:
+    if not sampled_entries:
         raise RuntimeError(
             "No samples collected. Check --sample-offset/--max-batches and dataset availability."
         )
+
+    sampled_entries = sorted(sampled_entries, key=lambda x: x["sample_id"])
+    for entry in sampled_entries:
+        sample_id = int(entry["sample_id"])
+        fig_path = output_dir / f"sample_{sample_id:06d}_action_compare.png"
+        sample_metrics = _plot_single_sample(
+            true_actions=entry["true_actions"],
+            pred_actions=entry["pred_actions"],
+            sample_id=sample_id,
+            output_path=fig_path,
+        )
+        collected.append(sample_metrics)
 
     overall_mae = float(np.mean([x["mae"] for x in collected]))
     overall_rmse = float(np.mean([x["rmse"] for x in collected]))
@@ -487,6 +530,11 @@ def main() -> None:
         "num_samples_collected": len(collected),
         "sample_offset": args.sample_offset,
         "processed_batches": processed_batches,
+        "sampling_mode": "random" if args.random_sample else "sequential",
+        "random_seed": args.random_seed if args.random_sample else None,
+        "num_candidates_seen_after_offset": seen_candidates_after_offset
+        if args.random_sample
+        else len(collected),
         "overall_mean_mae": overall_mae,
         "overall_mean_rmse": overall_rmse,
         "samples": collected,
