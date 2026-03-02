@@ -96,7 +96,7 @@ def parse_args() -> argparse.Namespace:
         "--smooth-window",
         type=int,
         default=9,
-        help="Moving-average window for per-frame MAE trend.",
+        help="Moving-average window for per-chunk MAE trend.",
     )
     parser.add_argument(
         "--output-dir",
@@ -352,99 +352,164 @@ def _load_episode_arrays(
     }
 
 
-def _predict_episode_first_step_actions(
+def _predict_episode_chunk_actions(
     model: Any,
     states: np.ndarray,
+    gt_actions: np.ndarray,
     table_frames: np.ndarray,
     wrist_frames: np.ndarray,
     prompt: str,
     infer_batch_size: int,
     action_dim: int,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    chunk_size = int(model_cfg_chunk_size(model))
     total = states.shape[0]
-    preds: list[np.ndarray] = []
-    for start in range(0, total, infer_batch_size):
-        end = min(start + infer_batch_size, total)
+    num_chunks = total // chunk_size
+    if num_chunks <= 0:
+        raise RuntimeError(
+            f"Episode too short for chunk comparison: total={total}, chunk_size={chunk_size}."
+        )
+
+    chunk_starts = np.arange(num_chunks, dtype=np.int64) * chunk_size
+    step_offsets = np.arange(chunk_size, dtype=np.int64)[None, :]
+
+    pred_chunks: list[np.ndarray] = []
+    gt_chunks: list[np.ndarray] = []
+
+    for start_idx in range(0, len(chunk_starts), infer_batch_size):
+        end_idx = min(start_idx + infer_batch_size, len(chunk_starts))
+        batch_starts = chunk_starts[start_idx:end_idx]
+
         # OpenPI action model expects tensor inputs in env_obs.
         env_obs = {
             "main_images": torch.from_numpy(
-                np.ascontiguousarray(table_frames[start:end])
+                np.ascontiguousarray(table_frames[batch_starts])
             ),
             "wrist_images": torch.from_numpy(
-                np.ascontiguousarray(wrist_frames[start:end])
+                np.ascontiguousarray(wrist_frames[batch_starts])
             ),
-            "states": torch.from_numpy(np.ascontiguousarray(states[start:end])),
-            "task_descriptions": [prompt] * (end - start),
+            "states": torch.from_numpy(np.ascontiguousarray(states[batch_starts])),
+            "task_descriptions": [prompt] * len(batch_starts),
         }
         with torch.no_grad():
             actions, _ = model.predict_action_batch(
                 env_obs, mode="eval", compute_values=False
             )
-        # actions shape: [B, action_chunk, action_dim]
-        first_step = np.asarray(actions[:, 0, :action_dim], dtype=np.float32)
-        preds.append(first_step)
-    return np.concatenate(preds, axis=0)
+        pred = np.asarray(actions[:, :chunk_size, :action_dim], dtype=np.float32)
+        gt = gt_actions[batch_starts[:, None] + step_offsets, :action_dim].astype(np.float32)
+        pred_chunks.append(pred)
+        gt_chunks.append(gt)
+
+    return (
+        np.concatenate(gt_chunks, axis=0),
+        np.concatenate(pred_chunks, axis=0),
+        chunk_starts,
+    )
+
+
+def model_cfg_chunk_size(model: Any) -> int:
+    chunk_size = getattr(getattr(model, "config", None), "action_chunk", None)
+    if chunk_size is None:
+        raise AttributeError("Cannot infer action_chunk from model.config.")
+    chunk_size = int(chunk_size)
+    if chunk_size <= 0:
+        raise ValueError(f"Invalid model action_chunk={chunk_size}.")
+    return chunk_size
 
 
 def _plot_episode_overview(
     episode_id: int,
-    true_actions: np.ndarray,
-    pred_actions: np.ndarray,
+    true_chunks: np.ndarray,
+    pred_chunks: np.ndarray,
+    chunk_starts: np.ndarray,
     out_path: pathlib.Path,
     smooth_window: int,
+    episode_total_frames: int,
 ) -> dict[str, Any]:
-    err = pred_actions - true_actions
+    err = pred_chunks - true_chunks
     abs_err = np.abs(err)
-    per_frame_mae = np.mean(abs_err, axis=1)
-    per_frame_mae_smooth = _moving_average(per_frame_mae, smooth_window)
-    per_dim_mae = np.mean(abs_err, axis=0)
-    per_dim_rmse = np.sqrt(np.mean(np.square(err), axis=0))
+    per_chunk_mae = np.mean(abs_err, axis=(1, 2))
+    per_chunk_mae_smooth = _moving_average(per_chunk_mae, smooth_window)
+    per_step_in_chunk_mae = np.mean(abs_err, axis=(0, 2))
+    per_dim_mae = np.mean(abs_err, axis=(0, 1))
+    per_dim_rmse = np.sqrt(np.mean(np.square(err), axis=(0, 1)))
 
-    vmin = float(min(true_actions.min(), pred_actions.min()))
-    vmax = float(max(true_actions.max(), pred_actions.max()))
-    emax = float(abs_err.max()) if abs_err.size > 0 else 1.0
+    chunk_size = true_chunks.shape[1]
+    flat_true = true_chunks.reshape(-1, true_chunks.shape[-1])
+    flat_pred = pred_chunks.reshape(-1, pred_chunks.shape[-1])
+    flat_abs_err = abs_err.reshape(-1, abs_err.shape[-1])
 
-    fig, axes = plt.subplots(4, 1, figsize=(14, 11), sharex=False)
-    x = np.arange(true_actions.shape[0])
+    vmin = float(min(flat_true.min(), flat_pred.min()))
+    vmax = float(max(flat_true.max(), flat_pred.max()))
+    emax = float(flat_abs_err.max()) if flat_abs_err.size > 0 else 1.0
 
-    axes[0].plot(x, per_frame_mae, color="#5e60ce", alpha=0.5, linewidth=1.2, label="MAE")
+    fig, axes = plt.subplots(5, 1, figsize=(14, 14), sharex=False)
+    chunk_x = np.arange(true_chunks.shape[0])
+    step_x = np.arange(chunk_size)
+
     axes[0].plot(
-        x,
-        per_frame_mae_smooth,
+        chunk_x,
+        per_chunk_mae,
+        color="#5e60ce",
+        alpha=0.5,
+        linewidth=1.2,
+        label="Chunk MAE",
+    )
+    axes[0].plot(
+        chunk_x,
+        per_chunk_mae_smooth,
         color="#3a0ca3",
         linewidth=2.0,
-        label=f"MAE smooth(w={smooth_window})",
+        label=f"Chunk MAE smooth(w={smooth_window})",
     )
     axes[0].set_title(
-        f"Episode {episode_id}: frame-wise fitting trend | "
-        f"mean MAE={np.mean(per_frame_mae):.4f}, mean RMSE={np.sqrt(np.mean(np.square(err))):.4f}"
+        f"Episode {episode_id}: chunk-wise fitting trend | "
+        f"num_chunks={true_chunks.shape[0]}, chunk_size={chunk_size}, "
+        f"mean MAE={np.mean(abs_err):.4f}, mean RMSE={np.sqrt(np.mean(np.square(err))):.4f}"
     )
-    axes[0].set_xlabel("Frame index")
+    axes[0].set_xlabel("Chunk index")
     axes[0].set_ylabel("MAE")
     axes[0].grid(alpha=0.3)
     axes[0].legend(loc="upper right")
 
-    im1 = axes[1].imshow(
-        true_actions.T, aspect="auto", origin="lower", cmap="coolwarm", vmin=vmin, vmax=vmax
+    axes[1].plot(
+        step_x,
+        per_step_in_chunk_mae,
+        marker="o",
+        linewidth=1.8,
+        color="#fb8500",
     )
-    axes[1].set_title("Ground-truth action (dim x frame)")
-    axes[1].set_ylabel("Action dim")
-    fig.colorbar(im1, ax=axes[1], fraction=0.025, pad=0.01)
+    axes[1].set_title("MAE by step position within chunk")
+    axes[1].set_xlabel("Step index in chunk")
+    axes[1].set_ylabel("MAE")
+    axes[1].grid(alpha=0.3)
 
     im2 = axes[2].imshow(
-        pred_actions.T, aspect="auto", origin="lower", cmap="coolwarm", vmin=vmin, vmax=vmax
+        flat_true.T, aspect="auto", origin="lower", cmap="coolwarm", vmin=vmin, vmax=vmax
     )
-    axes[2].set_title("Predicted action (first step of chunk)")
+    axes[2].set_title("Ground-truth action (dim x flattened chunk-step)")
     axes[2].set_ylabel("Action dim")
     fig.colorbar(im2, ax=axes[2], fraction=0.025, pad=0.01)
 
     im3 = axes[3].imshow(
-        abs_err.T, aspect="auto", origin="lower", cmap="magma", vmin=0.0, vmax=max(emax, 1e-6)
+        flat_pred.T, aspect="auto", origin="lower", cmap="coolwarm", vmin=vmin, vmax=vmax
     )
-    axes[3].set_title("Absolute error |pred-gt| (dim x frame)")
-    axes[3].set_xlabel("Frame index")
+    axes[3].set_title("Predicted action (dim x flattened chunk-step)")
     axes[3].set_ylabel("Action dim")
     fig.colorbar(im3, ax=axes[3], fraction=0.025, pad=0.01)
+
+    im4 = axes[4].imshow(
+        flat_abs_err.T,
+        aspect="auto",
+        origin="lower",
+        cmap="magma",
+        vmin=0.0,
+        vmax=max(emax, 1e-6),
+    )
+    axes[4].set_title("Absolute error |pred-gt| (dim x flattened chunk-step)")
+    axes[4].set_xlabel("Flattened chunk-step index")
+    axes[4].set_ylabel("Action dim")
+    fig.colorbar(im4, ax=axes[4], fraction=0.025, pad=0.01)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=180)
@@ -452,8 +517,12 @@ def _plot_episode_overview(
 
     return {
         "episode_id": episode_id,
-        "num_frames": int(true_actions.shape[0]),
-        "dim": int(true_actions.shape[1]),
+        "num_frames": int(episode_total_frames),
+        "effective_num_frames": int(flat_true.shape[0]),
+        "num_chunks": int(true_chunks.shape[0]),
+        "chunk_size": int(chunk_size),
+        "chunk_starts_head": [int(x) for x in chunk_starts[:10].tolist()],
+        "dim": int(true_chunks.shape[2]),
         "mae": float(np.mean(abs_err)),
         "rmse": float(np.sqrt(np.mean(np.square(err)))),
         "per_dim_mae": [float(x) for x in per_dim_mae.tolist()],
@@ -464,11 +533,15 @@ def _plot_episode_overview(
 
 def _plot_episode_trajectory_lines(
     episode_id: int,
-    true_actions: np.ndarray,
-    pred_actions: np.ndarray,
+    true_chunks: np.ndarray,
+    pred_chunks: np.ndarray,
     out_path: pathlib.Path,
 ) -> None:
-    dim = true_actions.shape[1]
+    flat_true = true_chunks.reshape(-1, true_chunks.shape[-1])
+    flat_pred = pred_chunks.reshape(-1, pred_chunks.shape[-1])
+    dim = flat_true.shape[1]
+    chunk_size = true_chunks.shape[1]
+
     ncols = 2
     nrows = int(math.ceil(dim / float(ncols)))
     fig, axes = plt.subplots(
@@ -478,13 +551,13 @@ def _plot_episode_trajectory_lines(
         sharex=True,
     )
     axes_arr = np.asarray(axes).reshape(-1)
-    x = np.arange(true_actions.shape[0])
+    x = np.arange(flat_true.shape[0])
 
     for d in range(dim):
         ax = axes_arr[d]
         ax.plot(
             x,
-            true_actions[:, d],
+            flat_true[:, d],
             color="#1d3557",
             linewidth=1.6,
             alpha=0.95,
@@ -492,12 +565,14 @@ def _plot_episode_trajectory_lines(
         )
         ax.plot(
             x,
-            pred_actions[:, d],
+            flat_pred[:, d],
             color="#e63946",
             linewidth=1.2,
             alpha=0.85,
             label="Pred",
         )
+        for pos in range(chunk_size, flat_true.shape[0], chunk_size):
+            ax.axvline(pos - 0.5, color="#aaaaaa", linewidth=0.5, alpha=0.25)
         ax.set_title(f"dim {d}")
         ax.grid(alpha=0.3)
         if d % ncols == 0:
@@ -511,7 +586,9 @@ def _plot_episode_trajectory_lines(
 
     handles, labels = axes_arr[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False)
-    fig.suptitle(f"Episode {episode_id}: full trajectory GT vs Pred by action dimension")
+    fig.suptitle(
+        f"Episode {episode_id}: chunk-aligned full trajectory GT vs Pred by action dimension"
+    )
     fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.96])
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
@@ -607,10 +684,10 @@ def main() -> None:
     pbar = tqdm(selected_episode_ids, desc="Episode trend eval", dynamic_ncols=True)
     for episode_id in pbar:
         arrays = _load_episode_arrays(dataset_root, episode_id, max_frames=args.max_frames)
-        true_actions = arrays["actions"][:, : args.action_dim]
-        pred_actions = _predict_episode_first_step_actions(
+        true_chunks, pred_chunks, chunk_starts = _predict_episode_chunk_actions(
             model=model,
             states=arrays["states"],
+            gt_actions=arrays["actions"],
             table_frames=arrays["table_frames"],
             wrist_frames=arrays["wrist_frames"],
             prompt=prompt,
@@ -621,15 +698,17 @@ def main() -> None:
         line_out_path = output_dir / f"episode_{episode_id:06d}_full_lines.png"
         episode_metrics = _plot_episode_overview(
             episode_id=episode_id,
-            true_actions=true_actions,
-            pred_actions=pred_actions,
+            true_chunks=true_chunks,
+            pred_chunks=pred_chunks,
+            chunk_starts=chunk_starts,
             out_path=out_path,
             smooth_window=args.smooth_window,
+            episode_total_frames=int(arrays["actions"].shape[0]),
         )
         _plot_episode_trajectory_lines(
             episode_id=episode_id,
-            true_actions=true_actions,
-            pred_actions=pred_actions,
+            true_chunks=true_chunks,
+            pred_chunks=pred_chunks,
             out_path=line_out_path,
         )
         episode_metrics["trajectory_figure"] = line_out_path.name
@@ -655,11 +734,13 @@ def main() -> None:
         "dataset_home": args.dataset_home,
         "repo_id": args.repo_id,
         "config_name": args.config_name,
+        "comparison_mode": "chunk_nonoverlap",
         "num_episodes_requested": args.num_episodes,
         "selected_episode_ids": selected_episode_ids,
         "sampling_mode": "manual" if args.episode_ids else "random",
         "random_seed": args.random_seed if not args.episode_ids else None,
         "infer_batch_size": args.infer_batch_size,
+        "action_chunk": args.num_action_chunks,
         "max_frames": args.max_frames,
         "prompt": prompt,
         "overall_mean_mae": float(np.mean([x["mae"] for x in episode_results])),
