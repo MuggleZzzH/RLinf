@@ -95,15 +95,27 @@ class IsaaclabBaseEnv(gym.Env):
             self.returns[:] = 0.0
             self._elapsed_steps[:] = 0
 
-    def _record_metrics(self, step_reward, terminations, infos):
+    def _record_metrics(
+        self,
+        step_reward,
+        terminations,
+        infos,
+        success_flags=None,
+        reward_terms=None,
+    ):
         episode_info = {}
         self.returns += step_reward
-        self.success_once = self.success_once | terminations
+        if success_flags is None:
+            success_flags = terminations
+        self.success_once = self.success_once | success_flags
         # batch level
         episode_info["success_once"] = self.success_once.clone()
         episode_info["return"] = self.returns.clone()
         episode_info["episode_len"] = self.elapsed_steps.clone()
         episode_info["reward"] = episode_info["return"] / episode_info["episode_len"]
+        if reward_terms is not None:
+            for key, value in reward_terms.items():
+                episode_info[key] = value.clone()
         infos["episode"] = episode_info
         return infos
 

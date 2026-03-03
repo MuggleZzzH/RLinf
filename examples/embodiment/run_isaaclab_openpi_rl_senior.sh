@@ -37,6 +37,80 @@ WANDB_EXP_NAME="${WANDB_EXP_NAME:-${RUN_NAME}}"
 # If you need temporary local overrides, pass them via EXTRA_HYDRA_ARGS.
 EXTRA_HYDRA_ARGS="${EXTRA_HYDRA_ARGS:-}"
 
+check_rollout_batch_divisibility() {
+    local config_file="$1"
+    local extra_args="$2"
+    python - "${config_file}" "${extra_args}" <<'PY'
+import shlex
+import sys
+
+from omegaconf import OmegaConf
+
+config_file = sys.argv[1]
+extra_args = sys.argv[2]
+cfg = OmegaConf.load(config_file)
+
+params = {
+    "num_envs": int(cfg.env.train.total_num_envs),
+    "steps_per_rollout": int(cfg.env.train.max_steps_per_rollout_epoch),
+    "num_action_chunks": int(cfg.actor.model.num_action_chunks),
+    "rollout_epoch": int(cfg.algorithm.rollout_epoch),
+    "global_batch_size": int(cfg.actor.global_batch_size),
+}
+
+override_key_to_var = {
+    "env.train.total_num_envs": "num_envs",
+    "env.train.max_steps_per_rollout_epoch": "steps_per_rollout",
+    "actor.model.num_action_chunks": "num_action_chunks",
+    "algorithm.rollout_epoch": "rollout_epoch",
+    "actor.global_batch_size": "global_batch_size",
+}
+
+for token in shlex.split(extra_args):
+    if "=" not in token:
+        continue
+    key, value = token.split("=", 1)
+    if key not in override_key_to_var:
+        continue
+    var_name = override_key_to_var[key]
+    try:
+        parsed_value = int(float(value))
+    except ValueError as exc:
+        raise ValueError(f"Override {key}={value!r} is not a valid numeric value.") from exc
+    params[var_name] = parsed_value
+
+num_envs = params["num_envs"]
+steps_per_rollout = params["steps_per_rollout"]
+num_action_chunks = params["num_action_chunks"]
+rollout_epoch = params["rollout_epoch"]
+global_batch_size = params["global_batch_size"]
+
+if num_action_chunks <= 0:
+    raise ValueError(f"actor.model.num_action_chunks must be positive, got {num_action_chunks}.")
+if steps_per_rollout % num_action_chunks != 0:
+    raise ValueError(
+        "env.train.max_steps_per_rollout_epoch must be divisible by actor.model.num_action_chunks, "
+        f"got {steps_per_rollout} and {num_action_chunks}."
+    )
+if global_batch_size <= 0:
+    raise ValueError(f"actor.global_batch_size must be positive, got {global_batch_size}.")
+
+rollout_size = num_envs * (steps_per_rollout // num_action_chunks) * rollout_epoch
+if rollout_size % global_batch_size != 0:
+    raise ValueError(
+        "rollout_size is not divisible by global_batch_size. "
+        f"rollout_size={rollout_size}, global_batch_size={global_batch_size}. "
+        "Adjust env.train.total_num_envs / env.train.max_steps_per_rollout_epoch / "
+        "algorithm.rollout_epoch / actor.global_batch_size."
+    )
+
+print(
+    f"[rollout-check] OK: rollout_size={rollout_size}, global_batch_size={global_batch_size}, "
+    f"num_updates_per_rollout={rollout_size // global_batch_size}"
+)
+PY
+}
+
 resolve_ckpt_path() {
     local input_path="$1"
     if [ -z "${input_path}" ] || [ "${input_path}" = "null" ]; then
@@ -134,6 +208,13 @@ if [ "${CKPT_PATH}" != "null" ] && [ ! -f "${CKPT_PATH}" ]; then
     echo "Resolved CKPT_PATH does not exist as file: ${CKPT_PATH}"
     echo "Set CKPT_INPUT=null to skip loading .pt checkpoint."
     exit 1
+fi
+
+CONFIG_FILE="${EMBODIED_PATH}/config/${CONFIG_NAME}.yaml"
+if [ -f "${CONFIG_FILE}" ]; then
+    check_rollout_batch_divisibility "${CONFIG_FILE}" "${EXTRA_HYDRA_ARGS}"
+else
+    echo "Warning: config file not found for rollout divisibility check: ${CONFIG_FILE}"
 fi
 
 TIMESTAMP="$(date +'%Y%m%d-%H%M%S')"

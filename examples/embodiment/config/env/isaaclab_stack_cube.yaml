@@ -7,6 +7,20 @@ seed: 0
 group_size: 1
 
 reward_coef: 1.0
+reward_cfg:
+  # Dense reward terms for stack-cube staged progress.
+  # Set to False to fallback to sparse success-only reward.
+  enable_dense_reward: True
+  # If enabled, the next stage only becomes reward-eligible after the previous stage is reached.
+  enable_stage_gating: True
+  # Failure signal: any cube below this world-z threshold is treated as drop failure.
+  drop_height_threshold: -0.05
+  rewards:
+    grasp_red: 0.10
+    stack_red_blue: 0.25
+    grasp_green: 0.10
+    success: 1.00
+    fail_drop: -0.30
 use_fixed_reset_state_ids: False
 max_steps_per_rollout_epoch: 256
 max_episode_steps: 256 # max episode steps for truncation
