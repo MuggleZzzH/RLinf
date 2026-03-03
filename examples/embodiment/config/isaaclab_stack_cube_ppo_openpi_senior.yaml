@@ -92,6 +92,8 @@ env:
     # Keep this divisible by actor.model.num_action_chunks (=10).
     # Tier-1 stable profile:
     # 880 with rollout_epoch=10 yields rollout_size ~= 24 * (880/10) * 10 = 21120.
+    # IMPORTANT: rollout_size must be divisible by actor.global_batch_size.
+    # Here 21120 / 960 = 22 (valid).
     max_steps_per_rollout_epoch: 880
     auto_reset: True
     use_fixed_reset_state_ids: False
@@ -122,7 +124,8 @@ actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
   micro_batch_size: 8
-  global_batch_size: 1024
+  # IMPORTANT: keep global_batch_size divisible with rollout_size, see env.train comment above.
+  global_batch_size: 960
   seed: 1234
   enable_offload: False
 
