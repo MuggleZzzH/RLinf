@@ -36,25 +36,10 @@ WANDB_ENABLE="${WANDB_ENABLE:-1}"
 WANDB_PROJECT="${WANDB_PROJECT:-rlinf}"
 WANDB_EXP_NAME="${WANDB_EXP_NAME:-${RUN_NAME}}"
 
-TOTAL_NUM_ENVS="${TOTAL_NUM_ENVS:-32}"
-MAX_EPISODE_STEPS="${MAX_EPISODE_STEPS:-440}"
-EVAL_ROLLOUT_EPOCH="${EVAL_ROLLOUT_EPOCH:-3}"
-SAVE_VIDEO="${SAVE_VIDEO:-true}"
-ACTION_CHUNK="${ACTION_CHUNK:-10}"
-
-if ! [[ "${MAX_EPISODE_STEPS}" =~ ^[0-9]+$ && "${ACTION_CHUNK}" =~ ^[0-9]+$ ]]; then
-    echo "MAX_EPISODE_STEPS and ACTION_CHUNK must be integers."
-    exit 1
-fi
-if [ "${ACTION_CHUNK}" -le 0 ]; then
-    echo "ACTION_CHUNK must be > 0."
-    exit 1
-fi
-if [ $((MAX_EPISODE_STEPS % ACTION_CHUNK)) -ne 0 ]; then
-    echo "MAX_EPISODE_STEPS (${MAX_EPISODE_STEPS}) must be divisible by ACTION_CHUNK (${ACTION_CHUNK})."
-    echo "Example: ACTION_CHUNK=10 with MAX_EPISODE_STEPS=440 or 450."
-    exit 1
-fi
+# Keep eval/training hyper-parameters in YAML.
+# This launcher only sets runtime paths/logging, not core algorithm/env knobs.
+# If you need temporary local overrides, pass them via EXTRA_HYDRA_ARGS.
+EXTRA_HYDRA_ARGS="${EXTRA_HYDRA_ARGS:-}"
 
 resolve_ckpt_path() {
     local input_path="$1"
@@ -199,12 +184,13 @@ CMD=(
     "runner.logger.project_name=${WANDB_PROJECT}"
     "runner.logger.experiment_name=${WANDB_EXP_NAME}"
     "runner.logger.logger_backends=${LOGGER_BACKENDS}"
-    "env.eval.total_num_envs=${TOTAL_NUM_ENVS}"
-    "env.eval.max_episode_steps=${MAX_EPISODE_STEPS}"
-    "env.eval.max_steps_per_rollout_epoch=${MAX_EPISODE_STEPS}"
-    "algorithm.eval_rollout_epoch=${EVAL_ROLLOUT_EPOCH}"
-    "env.eval.video_cfg.save_video=${SAVE_VIDEO}"
 )
+
+if [ -n "${EXTRA_HYDRA_ARGS}" ]; then
+    # shellcheck disable=SC2206
+    EXTRA_ARGS_ARR=(${EXTRA_HYDRA_ARGS})
+    CMD+=("${EXTRA_ARGS_ARR[@]}")
+fi
 
 echo "Running command:" | tee "${LOG_FILE}"
 printf ' %q' "${CMD[@]}" | tee -a "${LOG_FILE}"
