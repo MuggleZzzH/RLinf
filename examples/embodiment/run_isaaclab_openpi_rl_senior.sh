@@ -32,46 +32,10 @@ WANDB_ENABLE="${WANDB_ENABLE:-1}"
 WANDB_PROJECT="${WANDB_PROJECT:-rlinf}"
 WANDB_EXP_NAME="${WANDB_EXP_NAME:-${RUN_NAME}}"
 
-# Senior-style defaults (tier-1 stable profile)
-TRAIN_TOTAL_NUM_ENVS="${TRAIN_TOTAL_NUM_ENVS:-24}"
-EVAL_TOTAL_NUM_ENVS="${EVAL_TOTAL_NUM_ENVS:-4}"
-MAX_EPISODE_STEPS="${MAX_EPISODE_STEPS:-440}"
-TRAIN_MAX_STEPS_PER_ROLLOUT_EPOCH="${TRAIN_MAX_STEPS_PER_ROLLOUT_EPOCH:-880}"
-EVAL_MAX_STEPS_PER_ROLLOUT_EPOCH="${EVAL_MAX_STEPS_PER_ROLLOUT_EPOCH:-440}"
-ROLLOUT_EPOCH="${ROLLOUT_EPOCH:-10}"
-MAX_EPOCHS="${MAX_EPOCHS:-300}"
-# Keep this aligned with rollout_size divisibility check below.
-GLOBAL_BATCH_SIZE="${GLOBAL_BATCH_SIZE:-960}"
-MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-8}"
-ACTOR_LR="${ACTOR_LR:-4.0e-6}"
-VALUE_LR="${VALUE_LR:-1.0e-5}"
-
-ACTION_CHUNK="${ACTION_CHUNK:-10}"
-if ! [[ "${TRAIN_MAX_STEPS_PER_ROLLOUT_EPOCH}" =~ ^[0-9]+$ && "${EVAL_MAX_STEPS_PER_ROLLOUT_EPOCH}" =~ ^[0-9]+$ && "${ACTION_CHUNK}" =~ ^[0-9]+$ ]]; then
-    echo "TRAIN_MAX_STEPS_PER_ROLLOUT_EPOCH / EVAL_MAX_STEPS_PER_ROLLOUT_EPOCH / ACTION_CHUNK must be integers."
-    exit 1
-fi
-if [ $((TRAIN_MAX_STEPS_PER_ROLLOUT_EPOCH % ACTION_CHUNK)) -ne 0 ]; then
-    echo "TRAIN_MAX_STEPS_PER_ROLLOUT_EPOCH (${TRAIN_MAX_STEPS_PER_ROLLOUT_EPOCH}) must be divisible by ACTION_CHUNK (${ACTION_CHUNK})."
-    exit 1
-fi
-if [ $((EVAL_MAX_STEPS_PER_ROLLOUT_EPOCH % ACTION_CHUNK)) -ne 0 ]; then
-    echo "EVAL_MAX_STEPS_PER_ROLLOUT_EPOCH (${EVAL_MAX_STEPS_PER_ROLLOUT_EPOCH}) must be divisible by ACTION_CHUNK (${ACTION_CHUNK})."
-    exit 1
-fi
-
-# Prevent late runtime assert:
-# rollout_size = num_envs * (max_steps_per_rollout_epoch / action_chunk) * rollout_epoch
-if ! [[ "${TRAIN_TOTAL_NUM_ENVS}" =~ ^[0-9]+$ && "${ROLLOUT_EPOCH}" =~ ^[0-9]+$ && "${GLOBAL_BATCH_SIZE}" =~ ^[0-9]+$ ]]; then
-    echo "TRAIN_TOTAL_NUM_ENVS / ROLLOUT_EPOCH / GLOBAL_BATCH_SIZE must be integers."
-    exit 1
-fi
-ROLLOUT_SIZE=$((TRAIN_TOTAL_NUM_ENVS * (TRAIN_MAX_STEPS_PER_ROLLOUT_EPOCH / ACTION_CHUNK) * ROLLOUT_EPOCH))
-if [ $((ROLLOUT_SIZE % GLOBAL_BATCH_SIZE)) -ne 0 ]; then
-    echo "rollout_size (${ROLLOUT_SIZE}) must be divisible by GLOBAL_BATCH_SIZE (${GLOBAL_BATCH_SIZE})."
-    echo "Hint: with current tier-1 defaults, rollout_size=21120 and GLOBAL_BATCH_SIZE=960."
-    exit 1
-fi
+# Keep training hyper-parameters in YAML.
+# This launcher only sets runtime paths/logging, not RL/SFT core knobs.
+# If you need temporary local overrides, pass them via EXTRA_HYDRA_ARGS.
+EXTRA_HYDRA_ARGS="${EXTRA_HYDRA_ARGS:-}"
 
 resolve_ckpt_path() {
     local input_path="$1"
@@ -190,23 +154,17 @@ CMD=(
     "actor.model.model_path=${OPENPI_MODEL_DIR_RESOLVED}"
     "rollout.model.model_path=${OPENPI_MODEL_DIR_RESOLVED}"
     "runner.ckpt_path=${CKPT_PATH}"
-    "runner.max_epochs=${MAX_EPOCHS}"
     "runner.logger.log_path=${LOG_DIR}"
     "runner.logger.project_name=${WANDB_PROJECT}"
     "runner.logger.experiment_name=${WANDB_EXP_NAME}"
     "runner.logger.logger_backends=${LOGGER_BACKENDS}"
-    "algorithm.rollout_epoch=${ROLLOUT_EPOCH}"
-    "env.train.total_num_envs=${TRAIN_TOTAL_NUM_ENVS}"
-    "env.eval.total_num_envs=${EVAL_TOTAL_NUM_ENVS}"
-    "env.train.max_episode_steps=${MAX_EPISODE_STEPS}"
-    "env.eval.max_episode_steps=${MAX_EPISODE_STEPS}"
-    "env.train.max_steps_per_rollout_epoch=${TRAIN_MAX_STEPS_PER_ROLLOUT_EPOCH}"
-    "env.eval.max_steps_per_rollout_epoch=${EVAL_MAX_STEPS_PER_ROLLOUT_EPOCH}"
-    "actor.global_batch_size=${GLOBAL_BATCH_SIZE}"
-    "actor.micro_batch_size=${MICRO_BATCH_SIZE}"
-    "actor.optim.lr=${ACTOR_LR}"
-    "actor.optim.value_lr=${VALUE_LR}"
 )
+
+if [ -n "${EXTRA_HYDRA_ARGS}" ]; then
+    # shellcheck disable=SC2206
+    EXTRA_ARGS_ARR=(${EXTRA_HYDRA_ARGS})
+    CMD+=("${EXTRA_ARGS_ARR[@]}")
+fi
 
 echo "Running command:" | tee "${LOG_FILE}"
 printf ' %q' "${CMD[@]}" | tee -a "${LOG_FILE}"
