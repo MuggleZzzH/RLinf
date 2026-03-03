@@ -87,7 +87,7 @@ env:
   enable_offload: False
 
   train:
-    total_num_envs: 48
+    total_num_envs: 36
     max_episode_steps: 440
     # Keep this divisible by actor.model.num_action_chunks (=10).
     # Tier-1 stable profile:
@@ -122,7 +122,7 @@ actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
   micro_batch_size: 32
-  global_batch_size: 10560
+  global_batch_size: 5280
   seed: 1234
   enable_offload: False
 
