@@ -52,6 +52,13 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
         self.reward_grasp_green = float(getattr(reward_terms_cfg, "grasp_green", 0.10))
         self.reward_success = float(getattr(reward_terms_cfg, "success", 1.00))
         self.reward_fail_drop = float(getattr(reward_terms_cfg, "fail_drop", -0.30))
+        self._reward_term_keys = (
+            "reward/grasp_red",
+            "reward/stack_red_blue",
+            "reward/grasp_green",
+            "reward/success",
+            "reward/fail_drop",
+        )
 
     def _make_env_function(self):
         """
@@ -100,6 +107,19 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
         self._stage_fail_drop_done = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
+        self._reward_term_returns = {
+            key: torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+            for key in self._reward_term_keys
+        }
+        self._episode_success_term = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self._episode_fail_drop_term = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self._episode_other_termination_term = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
 
     def _reset_metrics(self, env_idx=None):
         super()._reset_metrics(env_idx)
@@ -111,12 +131,22 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
             self._stage_grasp_green_done[mask] = False
             self._stage_success_done[mask] = False
             self._stage_fail_drop_done[mask] = False
+            for key in self._reward_term_keys:
+                self._reward_term_returns[key][mask] = 0.0
+            self._episode_success_term[mask] = 0.0
+            self._episode_fail_drop_term[mask] = 0.0
+            self._episode_other_termination_term[mask] = 0.0
         else:
             self._stage_grasp_red_done[:] = False
             self._stage_stack_red_blue_done[:] = False
             self._stage_grasp_green_done[:] = False
             self._stage_success_done[:] = False
             self._stage_fail_drop_done[:] = False
+            for key in self._reward_term_keys:
+                self._reward_term_returns[key][:] = 0.0
+            self._episode_success_term[:] = 0.0
+            self._episode_fail_drop_term[:] = 0.0
+            self._episode_other_termination_term[:] = 0.0
 
     def _to_bool_tensor(self, value):
         if value is None:
@@ -138,6 +168,30 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
             "grasp_green": self._to_bool_tensor(subtask_terms.get("grasp_2")),
         }
 
+    def _compute_cubes_stacked(self, raw_obs):
+        cube_positions = raw_obs.get("policy", {}).get("cube_positions")
+        if cube_positions is None:
+            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        cube_positions = cube_positions.to(self.device)
+        cube_1 = cube_positions[:, 0:3]
+        cube_2 = cube_positions[:, 3:6]
+        cube_3 = cube_positions[:, 6:9]
+
+        pos_diff_c12 = cube_1 - cube_2
+        pos_diff_c23 = cube_2 - cube_3
+
+        xy_dist_c12 = torch.linalg.vector_norm(pos_diff_c12[:, :2], dim=1)
+        xy_dist_c23 = torch.linalg.vector_norm(pos_diff_c23[:, :2], dim=1)
+        h_dist_c12 = torch.abs(pos_diff_c12[:, 2])
+        h_dist_c23 = torch.abs(pos_diff_c23[:, 2])
+
+        stacked = torch.logical_and(xy_dist_c12 < 0.04, xy_dist_c23 < 0.04)
+        stacked = torch.logical_and(torch.abs(h_dist_c12 - 0.0468) < 0.005, stacked)
+        stacked = torch.logical_and(pos_diff_c12[:, 2] < 0.0, stacked)
+        stacked = torch.logical_and(torch.abs(h_dist_c23 - 0.0468) < 0.005, stacked)
+        stacked = torch.logical_and(pos_diff_c23[:, 2] < 0.0, stacked)
+        return stacked
+
     def _get_success_fail_signals(self, raw_obs, terminations):
         cube_positions = raw_obs.get("policy", {}).get("cube_positions")
         if cube_positions is None:
@@ -146,15 +200,17 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
             cube_positions = cube_positions.to(self.device)
             cube_z = cube_positions[:, 2::3]
             dropped = (cube_z < self.drop_height_threshold).any(dim=1)
-        success_terminated = terminations & (~dropped)
+        stacked = self._compute_cubes_stacked(raw_obs)
+        success_terminated = terminations & stacked
         fail_drop = terminations & dropped
-        return success_terminated, fail_drop
+        other_termination = terminations & (~success_terminated) & (~fail_drop)
+        return success_terminated, fail_drop, other_termination
 
     def step(self, actions=None, auto_reset=True):
         raw_obs, _, terminations, truncations, infos = self.env.step(actions)
         terminations = terminations.clone()
         truncations = truncations.clone()
-        success_terminated, fail_drop = self._get_success_fail_signals(
+        success_terminated, fail_drop, other_termination = self._get_success_fail_signals(
             raw_obs, terminations
         )
 
@@ -181,15 +237,19 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
         if self.enable_dense_reward:
             stage_signals = self._get_stage_signals(raw_obs)
             if self.enable_stage_gating:
+                grasp_red_reached = self._stage_grasp_red_done | stage_signals["grasp_red"]
+                stack_red_blue_reached = (
+                    self._stage_stack_red_blue_done | stage_signals["stack_red_blue"]
+                )
                 new_grasp_red = stage_signals["grasp_red"] & (~self._stage_grasp_red_done)
                 new_stack_red_blue = (
                     stage_signals["stack_red_blue"]
-                    & self._stage_grasp_red_done
+                    & grasp_red_reached
                     & (~self._stage_stack_red_blue_done)
                 )
                 new_grasp_green = (
                     stage_signals["grasp_green"]
-                    & self._stage_stack_red_blue_done
+                    & stack_red_blue_reached
                     & (~self._stage_grasp_green_done)
                 )
             else:
@@ -238,6 +298,24 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
             reward_terms["reward/success"] = reward_scale * success_terminated.float()
             step_reward = reward_terms["reward/success"]
 
+        for key in self._reward_term_keys:
+            self._reward_term_returns[key] += reward_terms[key]
+        self._episode_success_term += success_terminated.float()
+        self._episode_fail_drop_term += fail_drop.float()
+        self._episode_other_termination_term += other_termination.float()
+
+        reward_terms_for_log = {
+            key: self._reward_term_returns[key] for key in self._reward_term_keys
+        }
+        reward_terms_for_log.update(
+            {f"{key}/step": value for key, value in reward_terms.items()}
+        )
+        reward_terms_for_log["event/success_terminated"] = self._episode_success_term
+        reward_terms_for_log["event/fail_drop_terminated"] = self._episode_fail_drop_term
+        reward_terms_for_log["event/other_terminated"] = (
+            self._episode_other_termination_term
+        )
+
         if self.video_cfg.save_video:
             self.images.append(self.add_image(raw_obs))
 
@@ -254,7 +332,7 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
             terminations=terminations,
             infos={},
             success_flags=success_terminated,
-            reward_terms=reward_terms,
+            reward_terms=reward_terms_for_log,
         )
         if self.ignore_terminations:
             infos["episode"]["success_at_end"] = success_terminated

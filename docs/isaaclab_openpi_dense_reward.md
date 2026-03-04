@@ -81,6 +81,14 @@ In `infos["episode"]`, the following reward components are logged per env:
 - `reward/grasp_green`
 - `reward/success`
 - `reward/fail_drop`
+- `event/success_terminated`
+- `event/fail_drop_terminated`
+- `event/other_terminated`
+
+Notes:
+
+- `reward/*` are **episode cumulative values** (reset on env reset).
+- `reward/*/step` are instantaneous step values for debugging.
 
 These are visible in TensorBoard/W&B through RLinf metric logging.
 
