@@ -21,6 +21,14 @@ from ..isaaclab_env import IsaaclabBaseEnv
 
 
 class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
+    DEFAULT_REWARD_TERM_KEYS = (
+        "reward/grasp_red",
+        "reward/stack_red_blue",
+        "reward/grasp_green",
+        "reward/success",
+        "reward/fail_drop",
+    )
+
     def __init__(
         self,
         cfg,
@@ -52,13 +60,7 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
         self.reward_grasp_green = float(getattr(reward_terms_cfg, "grasp_green", 0.10))
         self.reward_success = float(getattr(reward_terms_cfg, "success", 1.00))
         self.reward_fail_drop = float(getattr(reward_terms_cfg, "fail_drop", -0.30))
-        self._reward_term_keys = (
-            "reward/grasp_red",
-            "reward/stack_red_blue",
-            "reward/grasp_green",
-            "reward/success",
-            "reward/fail_drop",
-        )
+        self._reward_term_keys = self.DEFAULT_REWARD_TERM_KEYS
 
     def _make_env_function(self):
         """
@@ -92,6 +94,8 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
 
     def _init_metrics(self):
         super()._init_metrics()
+        reward_term_keys = getattr(self, "_reward_term_keys", self.DEFAULT_REWARD_TERM_KEYS)
+        self._reward_term_keys = reward_term_keys
         self._stage_grasp_red_done = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
@@ -109,7 +113,7 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
         )
         self._reward_term_returns = {
             key: torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-            for key in self._reward_term_keys
+            for key in reward_term_keys
         }
         self._episode_success_term = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
