@@ -87,15 +87,14 @@ env:
   enable_offload: False
 
   train:
-    total_num_envs: 48
+    total_num_envs: 32
     max_episode_steps: 440
     # Keep this divisible by actor.model.num_action_chunks (=10).
     # Stable profile (rollout_epoch=1):
     # rollout_size = total_num_envs * (max_steps_per_rollout_epoch / num_action_chunks) * rollout_epoch
-    #              = 48 * (440 / 10) * 1 = 2112
-    # With rollout_epoch=1 and total_num_envs=48, the max valid global_batch_size is 2112.
-    # global_batch_size=2112, so rollout_size/global_batch_size = 1 (exactly divisible).
-    max_steps_per_rollout_epoch: 440
+    #              = 32 * (880 / 10) * 1 = 2816
+    # global_batch_size=2816, so rollout_size/global_batch_size = 1 (exactly divisible).
+    max_steps_per_rollout_epoch: 880
     auto_reset: True
     use_fixed_reset_state_ids: False
 
@@ -124,8 +123,8 @@ rollout:
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  micro_batch_size: 64
-  global_batch_size: 2112
+  micro_batch_size: 44
+  global_batch_size: 2816
   seed: 1234
   enable_offload: False
 
