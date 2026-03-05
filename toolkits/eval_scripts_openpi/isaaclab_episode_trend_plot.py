@@ -104,6 +104,14 @@ def parse_args() -> argparse.Namespace:
         default="result/isaaclab_openpi/episode_trend",
     )
     parser.add_argument("--run-name", type=str, default="")
+    parser.add_argument(
+        "--compare-sample-actions",
+        action="store_true",
+        help=(
+            "For each chunk start, run both predict_action_batch and sample_actions on the "
+            "same inputs (with synced RNG state) and report path-level differences."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -361,7 +369,8 @@ def _predict_episode_chunk_actions(
     prompt: str,
     infer_batch_size: int,
     action_dim: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    compare_sample_actions: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any] | None]:
     chunk_size = int(model_cfg_chunk_size(model))
     total = states.shape[0]
     num_chunks = total // chunk_size
@@ -375,6 +384,7 @@ def _predict_episode_chunk_actions(
 
     pred_chunks: list[np.ndarray] = []
     gt_chunks: list[np.ndarray] = []
+    path_diff_chunks: list[np.ndarray] = []
 
     for start_idx in range(0, len(chunk_starts), infer_batch_size):
         end_idx = min(start_idx + infer_batch_size, len(chunk_starts))
@@ -391,19 +401,68 @@ def _predict_episode_chunk_actions(
             "states": torch.from_numpy(np.ascontiguousarray(states[batch_starts])),
             "task_descriptions": [prompt] * len(batch_starts),
         }
+
+        cpu_rng_state = None
+        cuda_rng_states = None
+        if compare_sample_actions:
+            cpu_rng_state = torch.get_rng_state()
+            if torch.cuda.is_available():
+                cuda_rng_states = torch.cuda.get_rng_state_all()
+
         with torch.no_grad():
             actions, _ = model.predict_action_batch(
                 env_obs, mode="eval", compute_values=False
             )
         pred = np.asarray(actions[:, :chunk_size, :action_dim], dtype=np.float32)
+
+        if compare_sample_actions:
+            import openpi.models.model as openpi_model
+
+            if cpu_rng_state is not None:
+                torch.set_rng_state(cpu_rng_state)
+            if cuda_rng_states is not None:
+                torch.cuda.set_rng_state_all(cuda_rng_states)
+
+            with torch.no_grad():
+                to_process_obs = model.obs_processor(env_obs)
+                processed_obs = model.input_transform(to_process_obs, transpose=False)
+                processed_obs = model.precision_processor(processed_obs)
+                observation = openpi_model.Observation.from_dict(processed_obs)
+                sample_outputs = model.sample_actions(
+                    observation, mode="eval", compute_values=False
+                )
+                sample_actions = model.output_transform(
+                    {"actions": sample_outputs["actions"], "state": observation.state}
+                )["actions"].numpy()
+            sample_pred = np.asarray(
+                sample_actions[:, :chunk_size, :action_dim], dtype=np.float32
+            )
+            path_diff_chunks.append(pred - sample_pred)
+
         gt = gt_actions[batch_starts[:, None] + step_offsets, :action_dim].astype(np.float32)
         pred_chunks.append(pred)
         gt_chunks.append(gt)
+
+    path_compare_metrics = None
+    if compare_sample_actions and path_diff_chunks:
+        diff = np.concatenate(path_diff_chunks, axis=0)
+        abs_diff = np.abs(diff)
+        path_compare_metrics = {
+            "num_points": int(diff.size),
+            "mae": float(np.mean(abs_diff)),
+            "rmse": float(np.sqrt(np.mean(np.square(diff)))),
+            "max_abs": float(np.max(abs_diff)),
+            "per_dim_mae": [float(x) for x in np.mean(abs_diff, axis=(0, 1)).tolist()],
+            "per_dim_max_abs": [
+                float(x) for x in np.max(abs_diff, axis=(0, 1)).tolist()
+            ],
+        }
 
     return (
         np.concatenate(gt_chunks, axis=0),
         np.concatenate(pred_chunks, axis=0),
         chunk_starts,
+        path_compare_metrics,
     )
 
 
@@ -684,7 +743,7 @@ def main() -> None:
     pbar = tqdm(selected_episode_ids, desc="Episode trend eval", dynamic_ncols=True)
     for episode_id in pbar:
         arrays = _load_episode_arrays(dataset_root, episode_id, max_frames=args.max_frames)
-        true_chunks, pred_chunks, chunk_starts = _predict_episode_chunk_actions(
+        true_chunks, pred_chunks, chunk_starts, path_compare_metrics = _predict_episode_chunk_actions(
             model=model,
             states=arrays["states"],
             gt_actions=arrays["actions"],
@@ -693,6 +752,7 @@ def main() -> None:
             prompt=prompt,
             infer_batch_size=args.infer_batch_size,
             action_dim=args.action_dim,
+            compare_sample_actions=args.compare_sample_actions,
         )
         out_path = output_dir / f"episode_{episode_id:06d}_trend.png"
         line_out_path = output_dir / f"episode_{episode_id:06d}_full_lines.png"
@@ -712,14 +772,17 @@ def main() -> None:
             out_path=line_out_path,
         )
         episode_metrics["trajectory_figure"] = line_out_path.name
+        if path_compare_metrics is not None:
+            episode_metrics["path_compare"] = path_compare_metrics
         episode_results.append(episode_metrics)
-        pbar.set_postfix(
-            {
-                "episode": episode_id,
-                "mae": f'{episode_metrics["mae"]:.4f}',
-                "rmse": f'{episode_metrics["rmse"]:.4f}',
-            }
-        )
+        postfix = {
+            "episode": episode_id,
+            "mae": f'{episode_metrics["mae"]:.4f}',
+            "rmse": f'{episode_metrics["rmse"]:.4f}',
+        }
+        if path_compare_metrics is not None:
+            postfix["path_mae"] = f'{path_compare_metrics["mae"]:.3e}'
+        pbar.set_postfix(postfix)
     pbar.close()
 
     _plot_episode_summary(
@@ -745,9 +808,22 @@ def main() -> None:
         "prompt": prompt,
         "overall_mean_mae": float(np.mean([x["mae"] for x in episode_results])),
         "overall_mean_rmse": float(np.mean([x["rmse"] for x in episode_results])),
+        "path_compare_enabled": bool(args.compare_sample_actions),
         "episodes": episode_results,
         "summary_figure": "episodes_summary.png",
     }
+    if args.compare_sample_actions:
+        path_entries = [x["path_compare"] for x in episode_results if "path_compare" in x]
+        if path_entries:
+            summary["path_compare_overall_mean_mae"] = float(
+                np.mean([x["mae"] for x in path_entries])
+            )
+            summary["path_compare_overall_mean_rmse"] = float(
+                np.mean([x["rmse"] for x in path_entries])
+            )
+            summary["path_compare_overall_max_abs"] = float(
+                np.max([x["max_abs"] for x in path_entries])
+            )
     with (output_dir / "summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
@@ -755,6 +831,13 @@ def main() -> None:
     print(f"[done] selected_episode_ids: {selected_episode_ids}")
     print(f"[done] overall_mean_mae: {summary['overall_mean_mae']:.6f}")
     print(f"[done] overall_mean_rmse: {summary['overall_mean_rmse']:.6f}")
+    if args.compare_sample_actions and "path_compare_overall_mean_mae" in summary:
+        print(
+            "[done] path_compare mean_mae="
+            f"{summary['path_compare_overall_mean_mae']:.6e}, "
+            f"mean_rmse={summary['path_compare_overall_mean_rmse']:.6e}, "
+            f"max_abs={summary['path_compare_overall_max_abs']:.6e}"
+        )
     print(f"[done] summary: {output_dir / 'summary.json'}")
 
 

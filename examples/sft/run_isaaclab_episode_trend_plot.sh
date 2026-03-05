@@ -48,6 +48,7 @@ ACTION_DIM="${ACTION_DIM:-7}"
 NUM_ACTION_CHUNKS="${NUM_ACTION_CHUNKS:-10}"
 NUM_STEPS="${NUM_STEPS:-4}"
 PRECISION="${PRECISION:-null}"
+COMPARE_SAMPLE_ACTIONS="${COMPARE_SAMPLE_ACTIONS:-0}"
 
 resolve_openpi_model_dir() {
     local input_dir="$1"
@@ -173,6 +174,10 @@ fi
 
 if [ -n "${PROMPT}" ]; then
     CMD+=(--prompt "${PROMPT}")
+fi
+
+if [ "${COMPARE_SAMPLE_ACTIONS}" = "1" ]; then
+    CMD+=(--compare-sample-actions)
 fi
 
 echo "Running command:" | tee "${LOG_FILE}"
