@@ -1,0 +1,198 @@
+#!/bin/bash
+
+set -euo pipefail
+
+EMBODIED_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_PATH="$(dirname "$(dirname "$EMBODIED_PATH")")"
+SRC_FILE="${EMBODIED_PATH}/eval_embodied_agent.py"
+RUNTIME_SETUP_FILE="${REPO_PATH}/examples/common/setup_isaaclab_runtime.sh"
+
+if [ -f "${RUNTIME_SETUP_FILE}" ]; then
+    # shellcheck disable=SC1090
+    source "${RUNTIME_SETUP_FILE}"
+    setup_isaaclab_runtime "${REPO_PATH}"
+else
+    echo "Runtime setup file not found: ${RUNTIME_SETUP_FILE}"
+    exit 1
+fi
+
+export REPO_PATH
+export EMBODIED_PATH
+export PYTHONPATH="${REPO_PATH}:${PYTHONPATH:-}"
+export HYDRA_FULL_ERROR=1
+
+CONFIG_NAME="${CONFIG_NAME:-isaaclab_stack_cube_openpi_eval_newdata}"
+RUN_NAME="${RUN_NAME:-isaaclab_openpi_eval_newdata}"
+RESULT_ROOT="${RESULT_ROOT:-${REPO_PATH}/result/isaaclab_openpi_newdata/eval}"
+
+# OpenPI model directory with safetensors/norm stats.
+# If set to "auto" (default), infer from CKPT_INPUT first.
+OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-auto}"
+
+# Optional: RLinf .pt checkpoint file or directory containing full_weigths.pt/full_weights.pt.
+CKPT_INPUT="${CKPT_INPUT:-/mnt/project_rlinf_hs/Jiahao/results/isaaclab_sft/isaaclab_stack_cube_sft_2048/checkpoints/global_step_30000/actor/model_state_dict}"
+
+WANDB_ENABLE="${WANDB_ENABLE:-1}"
+WANDB_PROJECT="${WANDB_PROJECT:-rlinf}"
+WANDB_EXP_NAME="${WANDB_EXP_NAME:-${RUN_NAME}}"
+
+# Keep eval/training hyper-parameters in YAML.
+# This launcher only sets runtime paths/logging, not core algorithm/env knobs.
+# If you need temporary local overrides, pass them via EXTRA_HYDRA_ARGS.
+EXTRA_HYDRA_ARGS="${EXTRA_HYDRA_ARGS:-}"
+
+resolve_ckpt_path() {
+    local input_path="$1"
+    if [ -z "${input_path}" ] || [ "${input_path}" = "null" ]; then
+        echo "null"
+        return
+    fi
+
+    if [ -f "${input_path}" ]; then
+        echo "${input_path}"
+        return
+    fi
+
+    if [ -d "${input_path}" ]; then
+        if [ -f "${input_path}/full_weigths.pt" ]; then
+            echo "${input_path}/full_weigths.pt"
+            return
+        fi
+        if [ -f "${input_path}/full_weights.pt" ]; then
+            echo "${input_path}/full_weights.pt"
+            return
+        fi
+
+        local found
+        found="$(find "${input_path}" -maxdepth 4 -type f \( -name "full_weigths.pt" -o -name "full_weights.pt" \) | head -n 1)"
+        if [ -n "${found}" ]; then
+            echo "${found}"
+            return
+        fi
+    fi
+
+    echo "${input_path}"
+}
+
+resolve_openpi_model_dir() {
+    local input_dir="$1"
+    if [ ! -d "${input_dir}" ]; then
+        echo ""
+        return
+    fi
+
+    if ls "${input_dir}"/*.safetensors >/dev/null 2>&1 || [ -f "${input_dir}/model.safetensors" ]; then
+        echo "${input_dir}"
+        return
+    fi
+
+    local parent_dir
+    parent_dir="$(dirname "${input_dir}")"
+    if ls "${parent_dir}"/*.safetensors >/dev/null 2>&1 || [ -f "${parent_dir}/model.safetensors" ]; then
+        echo "${parent_dir}"
+        return
+    fi
+
+    local found_weight
+    found_weight="$(find "${input_dir}" -maxdepth 4 -type f \( -name "*.safetensors" -o -name "model.safetensors" \) | head -n 1)"
+    if [ -n "${found_weight}" ]; then
+        dirname "${found_weight}"
+        return
+    fi
+
+    echo "${input_dir}"
+}
+
+has_norm_stats() {
+    local dir="$1"
+    if [ -f "${dir}/generated_simdata_full/norm_stats.json" ] || [ -f "${dir}/physical-intelligence/isaaclab_stack_cube/norm_stats.json" ]; then
+        return 0
+    fi
+    if find "${dir}" -maxdepth 4 -type f -name "norm_stats.json" | head -n 1 | grep -q "."; then
+        return 0
+    fi
+    return 1
+}
+
+infer_openpi_model_dir_from_ckpt() {
+    local input_path="$1"
+    local candidate_dir=""
+    if [ -z "${input_path}" ] || [ "${input_path}" = "null" ]; then
+        echo ""
+        return
+    fi
+    if [ -f "${input_path}" ]; then
+        candidate_dir="$(dirname "${input_path}")"
+    elif [ -d "${input_path}" ]; then
+        candidate_dir="${input_path}"
+    else
+        echo ""
+        return
+    fi
+    resolve_openpi_model_dir "${candidate_dir}"
+}
+
+if [ -z "${OPENPI_MODEL_DIR}" ] || [ "${OPENPI_MODEL_DIR}" = "auto" ]; then
+    OPENPI_MODEL_DIR_RESOLVED="$(infer_openpi_model_dir_from_ckpt "${CKPT_INPUT}")"
+else
+    OPENPI_MODEL_DIR_RESOLVED="$(resolve_openpi_model_dir "${OPENPI_MODEL_DIR}")"
+fi
+
+if [ -z "${OPENPI_MODEL_DIR_RESOLVED}" ] || [ ! -d "${OPENPI_MODEL_DIR_RESOLVED}" ]; then
+    echo "OPENPI_MODEL_DIR does not exist: ${OPENPI_MODEL_DIR}"
+    echo "Tip: set OPENPI_MODEL_DIR explicitly, or set CKPT_INPUT to a directory containing safetensors + norm_stats."
+    exit 1
+fi
+
+NORM_PATH="$(find "${OPENPI_MODEL_DIR_RESOLVED}" -maxdepth 4 -type f -name "norm_stats.json" | head -n 1 || true)"
+if has_norm_stats "${OPENPI_MODEL_DIR_RESOLVED}"; then
+    echo "Using OpenPI model dir: ${OPENPI_MODEL_DIR_RESOLVED}"
+    if [ -n "${NORM_PATH}" ]; then
+        echo "Detected norm stats: ${NORM_PATH}"
+    fi
+else
+    echo "Warning: no norm_stats.json found under ${OPENPI_MODEL_DIR_RESOLVED}."
+    echo "This may cause normalization mismatch during eval."
+fi
+
+CKPT_PATH="$(resolve_ckpt_path "${CKPT_INPUT}")"
+if [ "${CKPT_PATH}" != "null" ] && [ ! -f "${CKPT_PATH}" ]; then
+    echo "Resolved CKPT_PATH does not exist as file: ${CKPT_PATH}"
+    echo "Set CKPT_INPUT=null to skip loading .pt checkpoint."
+    exit 1
+fi
+
+TIMESTAMP="$(date +'%Y%m%d-%H%M%S')"
+LOG_DIR="${RESULT_ROOT}/${RUN_NAME}-${TIMESTAMP}"
+mkdir -p "${LOG_DIR}"
+LOG_FILE="${LOG_DIR}/run_eval_newdata.log"
+
+if [ "${WANDB_ENABLE}" = "1" ]; then
+    LOGGER_BACKENDS="[tensorboard,wandb]"
+else
+    LOGGER_BACKENDS="[tensorboard]"
+fi
+
+CMD=(
+    python "${SRC_FILE}"
+    --config-path "${EMBODIED_PATH}/config"
+    --config-name "${CONFIG_NAME}"
+    "actor.model.model_path=${OPENPI_MODEL_DIR_RESOLVED}"
+    "rollout.model.model_path=${OPENPI_MODEL_DIR_RESOLVED}"
+    "runner.ckpt_path=${CKPT_PATH}"
+    "runner.logger.log_path=${LOG_DIR}"
+    "runner.logger.project_name=${WANDB_PROJECT}"
+    "runner.logger.experiment_name=${WANDB_EXP_NAME}"
+    "runner.logger.logger_backends=${LOGGER_BACKENDS}"
+)
+
+if [ -n "${EXTRA_HYDRA_ARGS}" ]; then
+    # shellcheck disable=SC2206
+    EXTRA_ARGS_ARR=(${EXTRA_HYDRA_ARGS})
+    CMD+=("${EXTRA_ARGS_ARR[@]}")
+fi
+
+echo "Running command:" | tee "${LOG_FILE}"
+printf ' %q' "${CMD[@]}" | tee -a "${LOG_FILE}"
+echo | tee -a "${LOG_FILE}"
+"${CMD[@]}" 2>&1 | tee -a "${LOG_FILE}"
