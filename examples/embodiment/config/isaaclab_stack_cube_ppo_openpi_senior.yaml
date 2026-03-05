@@ -42,7 +42,7 @@ algorithm:
   kl_penalty: kl
   group_size: 1
   reward_coef: 1.0
-  rollout_epoch: 10
+  rollout_epoch: 1
   eval_rollout_epoch: 1
 
   reward_type: chunk_level
@@ -87,13 +87,14 @@ env:
   enable_offload: False
 
   train:
-    total_num_envs: 36
+    total_num_envs: 48
     max_episode_steps: 440
     # Keep this divisible by actor.model.num_action_chunks (=10).
-    # 2-GPU stable profile:
+    # Stable profile (rollout_epoch=1):
     # rollout_size = total_num_envs * (max_steps_per_rollout_epoch / num_action_chunks) * rollout_epoch
-    #              = 48 * (440 / 10) * 10 = 21120
-    # global_batch_size=10560, so rollout_size/global_batch_size = 2 (exactly divisible).
+    #              = 48 * (440 / 10) * 1 = 2112
+    # With rollout_epoch=1 and total_num_envs=48, the max valid global_batch_size is 2112.
+    # global_batch_size=2112, so rollout_size/global_batch_size = 1 (exactly divisible).
     max_steps_per_rollout_epoch: 440
     auto_reset: True
     use_fixed_reset_state_ids: False
@@ -123,8 +124,8 @@ rollout:
 actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
-  micro_batch_size: 32
-  global_batch_size: 5280
+  micro_batch_size: 64
+  global_batch_size: 2112
   seed: 1234
   enable_offload: False
 
