@@ -360,11 +360,12 @@ class CollectEpisode(gym.Wrapper):
         states: list[np.ndarray] = []
         np_actions: list[np.ndarray] = []
         dones: list[bool] = []
+        extra_images_by_cam: dict[int, list[np.ndarray]] = {}
         first_term_step: Optional[int] = None
 
         for i, action in enumerate(actions):
             obs = obs_steps[i] if i < len(obs_steps) else None
-            image, wrist_image, state = self._extract_obs_image_state(obs)
+            image, wrist_image, state, extra_imgs = self._extract_obs_image_state(obs)
             np_action = self._to_numpy(action)
 
             if image is None or state is None or np_action is None:
@@ -373,6 +374,11 @@ class CollectEpisode(gym.Wrapper):
             images.append(self._to_uint8(np.asarray(image)))
             if wrist_image is not None:
                 wrist_images.append(self._to_uint8(np.asarray(wrist_image)))
+            if extra_imgs is not None:
+                for cam_idx, extra_img in enumerate(extra_imgs):
+                    extra_images_by_cam.setdefault(cam_idx, []).append(
+                        self._to_uint8(np.asarray(extra_img))
+                    )
             states.append(np.asarray(state).astype(np.float32))
             np_actions.append(np.asarray(np_action).astype(np.float32))
             dones.append(False)
@@ -388,9 +394,17 @@ class CollectEpisode(gym.Wrapper):
         if dones_out:
             dones_out[-1] = True
 
+        extra_images: dict[str, list[np.ndarray]] | None = None
+        if extra_images_by_cam:
+            extra_images = {
+                f"extra_image_{cam_idx}": imgs[:end]
+                for cam_idx, imgs in sorted(extra_images_by_cam.items())
+            }
+
         return {
             "images": images[:end],
             "wrist_images": wrist_images[:end] if wrist_images else None,
+            "extra_images": extra_images,
             "states": states[:end],
             "actions": np_actions[:end],
             "dones": dones_out,
@@ -401,6 +415,9 @@ class CollectEpisode(gym.Wrapper):
     def _ensure_lerobot_writer(self, ep_data: dict) -> LeRobotDatasetWriter:
         """Create the LeRobot writer on first use. Must be called inside the lock."""
         if self._lerobot_writer is None:
+            extra_image_keys: list[str] = []
+            if ep_data.get("extra_images"):
+                extra_image_keys = sorted(ep_data["extra_images"].keys())
             self._lerobot_writer = LeRobotDatasetWriter(
                 root_dir=self.save_dir,
                 robot_type=self.robot_type,
@@ -410,6 +427,7 @@ class CollectEpisode(gym.Wrapper):
                 action_dim=ep_data["actions"][0].shape[-1],
                 use_incremental_stats=True,
                 stats_sample_ratio=self.stats_sample_ratio,
+                extra_image_keys=extra_image_keys,
             )
         return self._lerobot_writer
 
@@ -417,11 +435,18 @@ class CollectEpisode(gym.Wrapper):
         with self._lerobot_lock:
             writer = self._ensure_lerobot_writer(ep_data)
             wrist_images = ep_data["wrist_images"]
+            extra_images_raw = ep_data.get("extra_images")
+            extra_images: dict[str, np.ndarray] | None = None
+            if extra_images_raw:
+                extra_images = {
+                    k: np.stack(v) for k, v in extra_images_raw.items()
+                }
             writer.add_episode(
                 images=np.stack(ep_data["images"]),
                 wrist_images=np.stack(wrist_images)
                 if wrist_images is not None
                 else None,
+                extra_images=extra_images,
                 states=np.stack(ep_data["states"]),
                 actions=np.stack(ep_data["actions"]),
                 task=ep_data["task"],
@@ -533,13 +558,30 @@ class CollectEpisode(gym.Wrapper):
         return "unknown task"
 
     def _extract_obs_image_state(self, obs):
-        """Return ``(image, wrist_image, state)`` numpy arrays from an obs dict."""
+        """Return ``(image, wrist_image, state, extra_images)`` from an obs dict.
+
+        ``extra_images`` is a list of ``[H, W, C]`` arrays (one per extra
+        camera) extracted from the ``extra_view_images`` key, or ``None``.
+        """
         if not isinstance(obs, dict):
-            return None, None, None
+            return None, None, None, None
         image = obs.get("main_images", obs.get("image", obs.get("full_image")))
         wrist_image = obs.get("wrist_images", obs.get("wrist_image"))
         state = obs.get("states", obs.get("state"))
-        return self._to_numpy(image), self._to_numpy(wrist_image), self._to_numpy(state)
+
+        extra_images: list[np.ndarray] | None = None
+        extra_view = obs.get("extra_view_images")
+        if extra_view is not None:
+            extra_np = self._to_numpy(extra_view)
+            if extra_np is not None and extra_np.ndim >= 3:
+                extra_images = [extra_np[i] for i in range(extra_np.shape[0])]
+
+        return (
+            self._to_numpy(image),
+            self._to_numpy(wrist_image),
+            self._to_numpy(state),
+            extra_images,
+        )
 
     def _slice_data(self, data, env_idx: int):
         """Slice batched data for a single env without copying."""

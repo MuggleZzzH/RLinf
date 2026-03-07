@@ -87,6 +87,7 @@ class LeRobotDatasetWriter:
         codebase_version: str = "v2.0",
         use_incremental_stats: bool = False,
         stats_sample_ratio: float = 0.1,
+        extra_image_keys: list[str] | None = None,
     ):
         """
         Initialize the LeRobot dataset writer.
@@ -102,6 +103,8 @@ class LeRobotDatasetWriter:
             codebase_version: LeRobot version string
             use_incremental_stats: Whether to use incremental statistics (Welford's algorithm) to avoid storing all raw data
             stats_sample_ratio: Sampling ratio for statistics (images only, to reduce memory usage)
+            extra_image_keys: Column names for additional camera images
+                (e.g. ``["extra_image_0", "extra_image_1"]``).
         """
         self.root_dir = root_dir
         self.robot_type = robot_type
@@ -113,6 +116,7 @@ class LeRobotDatasetWriter:
         self.codebase_version = codebase_version
         self.use_incremental_stats = use_incremental_stats
         self.stats_sample_ratio = stats_sample_ratio
+        self.extra_image_keys: list[str] = extra_image_keys or []
 
         self.logger = get_logger()
 
@@ -121,75 +125,29 @@ class LeRobotDatasetWriter:
         self._tasks: dict[str, int] = {}  # task_str -> task_index
         self._global_frame_index = 0  # Global frame counter
 
+        _img_acc_incremental = lambda: {
+            "sum": None, "sum_sq": None, "count": 0, "min": None, "max": None,
+        }
+        _scalar_acc_incremental = lambda: {
+            "sum": 0.0, "sum_sq": 0.0, "count": 0,
+            "min": float("inf"), "max": float("-inf"),
+        }
+
         if use_incremental_stats:
-            # Accumulators using Welford's online algorithm (no raw data storage)
             self._stats_accumulators: dict[str, dict[str, Any]] = {
-                "image": {
-                    "sum": None,
-                    "sum_sq": None,
-                    "count": 0,
-                    "min": None,
-                    "max": None,
-                },
-                "wrist_image": {
-                    "sum": None,
-                    "sum_sq": None,
-                    "count": 0,
-                    "min": None,
-                    "max": None,
-                },
-                "state": {
-                    "sum": None,
-                    "sum_sq": None,
-                    "count": 0,
-                    "min": None,
-                    "max": None,
-                },
-                "actions": {
-                    "sum": None,
-                    "sum_sq": None,
-                    "count": 0,
-                    "min": None,
-                    "max": None,
-                },
-                "timestamp": {
-                    "sum": 0.0,
-                    "sum_sq": 0.0,
-                    "count": 0,
-                    "min": float("inf"),
-                    "max": float("-inf"),
-                },
-                "frame_index": {
-                    "sum": 0.0,
-                    "sum_sq": 0.0,
-                    "count": 0,
-                    "min": float("inf"),
-                    "max": float("-inf"),
-                },
-                "episode_index": {
-                    "sum": 0.0,
-                    "sum_sq": 0.0,
-                    "count": 0,
-                    "min": float("inf"),
-                    "max": float("-inf"),
-                },
-                "index": {
-                    "sum": 0.0,
-                    "sum_sq": 0.0,
-                    "count": 0,
-                    "min": float("inf"),
-                    "max": float("-inf"),
-                },
-                "task_index": {
-                    "sum": 0.0,
-                    "sum_sq": 0.0,
-                    "count": 0,
-                    "min": float("inf"),
-                    "max": float("-inf"),
-                },
+                "image": _img_acc_incremental(),
+                "wrist_image": _img_acc_incremental(),
+                "state": _img_acc_incremental(),
+                "actions": _img_acc_incremental(),
+                "timestamp": _scalar_acc_incremental(),
+                "frame_index": _scalar_acc_incremental(),
+                "episode_index": _scalar_acc_incremental(),
+                "index": _scalar_acc_incremental(),
+                "task_index": _scalar_acc_incremental(),
             }
+            for key in self.extra_image_keys:
+                self._stats_accumulators[key] = _img_acc_incremental()
         else:
-            # Original approach: accumulate raw data
             self._stats_accumulators: dict[str, dict[str, Any]] = {
                 "image": {"values": []},
                 "wrist_image": {"values": []},
@@ -201,6 +159,8 @@ class LeRobotDatasetWriter:
                 "index": {"values": []},
                 "task_index": {"values": []},
             }
+            for key in self.extra_image_keys:
+                self._stats_accumulators[key] = {"values": []}
 
         # Create directory structure
         self._create_directories()
@@ -267,6 +227,7 @@ class LeRobotDatasetWriter:
         task: str,
         is_success: bool,
         dones: np.ndarray | None = None,
+        extra_images: dict[str, np.ndarray] | None = None,
     ) -> int:
         """
         Add an episode to the dataset.
@@ -279,6 +240,8 @@ class LeRobotDatasetWriter:
             task: Task description string
             is_success: Whether this is a successful trajectory
             dones: Per-step done flags [T] bool; if None, auto-generated (True only at last step)
+            extra_images: Mapping from column name to images [T, H, W, C] uint8
+                for additional cameras (e.g. ``{"extra_image_0": arr, ...}``).
 
         Returns:
             episode_index: Index of the added episode
@@ -312,8 +275,11 @@ class LeRobotDatasetWriter:
             f"first_5={dones[:5].tolist()}, last_5={dones[-5:].tolist()}"
         )
 
+        if extra_images is None:
+            extra_images = {}
+
         # Build parquet data
-        data = {
+        data: dict[str, list] = {
             "image": [],
             "wrist_image": [],
             "state": [],
@@ -323,9 +289,11 @@ class LeRobotDatasetWriter:
             "episode_index": [],
             "index": [],
             "task_index": [],
-            "done": [],  # Per-step done flag
+            "done": [],
             "is_success": [],
         }
+        for key in self.extra_image_keys:
+            data[key] = []
 
         for t in range(T):
             # Image struct
@@ -337,8 +305,16 @@ class LeRobotDatasetWriter:
                     self._create_image_struct(wrist_images[t], t)
                 )
             else:
-                # Create an empty wrist image
                 data["wrist_image"].append({"bytes": b"", "path": ""})
+
+            # Extra camera image structs
+            for key in self.extra_image_keys:
+                if key in extra_images:
+                    data[key].append(
+                        self._create_image_struct(extra_images[key][t], t)
+                    )
+                else:
+                    data[key].append({"bytes": b"", "path": ""})
 
             # State and actions as lists (for fixed_size_list)
             data["state"].append(states[t].astype(np.float32).tolist())
@@ -350,11 +326,13 @@ class LeRobotDatasetWriter:
             data["episode_index"].append(episode_index)
             data["index"].append(self._global_frame_index + t)
             data["task_index"].append(task_index)
-            data["done"].append(bool(dones[t]))  # Per-step done flag
+            data["done"].append(bool(dones[t]))
             data["is_success"].append(is_success)
 
         # Update stats accumulators
-        self._update_stats_accumulators(images, wrist_images, states, actions, data)
+        self._update_stats_accumulators(
+            images, wrist_images, states, actions, data, extra_images
+        )
 
         # Update global frame index
         self._global_frame_index += T
@@ -387,63 +365,70 @@ class LeRobotDatasetWriter:
 
     def _create_parquet_schema(self) -> pa.Schema:
         """Create a PyArrow schema with HuggingFace features metadata."""
-        # Image struct type
         image_struct = pa.struct([("bytes", pa.binary()), ("path", pa.string())])
 
-        schema = pa.schema(
-            [
-                ("image", image_struct),
-                ("wrist_image", image_struct),
-                ("state", pa.list_(pa.float32(), self.state_dim)),
-                ("actions", pa.list_(pa.float32(), self.action_dim)),
-                ("timestamp", pa.float32()),
-                ("frame_index", pa.int64()),
-                ("episode_index", pa.int64()),
-                ("index", pa.int64()),
-                ("task_index", pa.int64()),
-                ("done", pa.bool_()),  # Per-step done flag
-                ("is_success", pa.bool_()),
-            ]
-        )
+        fields = [
+            ("image", image_struct),
+            ("wrist_image", image_struct),
+        ]
+        for key in self.extra_image_keys:
+            fields.append((key, image_struct))
+        fields.extend([
+            ("state", pa.list_(pa.float32(), self.state_dim)),
+            ("actions", pa.list_(pa.float32(), self.action_dim)),
+            ("timestamp", pa.float32()),
+            ("frame_index", pa.int64()),
+            ("episode_index", pa.int64()),
+            ("index", pa.int64()),
+            ("task_index", pa.int64()),
+            ("done", pa.bool_()),
+            ("is_success", pa.bool_()),
+        ])
+        schema = pa.schema(fields)
 
-        # Add HuggingFace features metadata so HuggingFace datasets can correctly parse image fields
-        hf_features = {
-            "info": {
-                "features": {
-                    "image": {"_type": "Image"},
-                    "wrist_image": {"_type": "Image"},
-                    "state": {
-                        "feature": {"dtype": "float32", "_type": "Value"},
-                        "length": self.state_dim,
-                        "_type": "Sequence",
-                    },
-                    "actions": {
-                        "feature": {"dtype": "float32", "_type": "Value"},
-                        "length": self.action_dim,
-                        "_type": "Sequence",
-                    },
-                    "timestamp": {"dtype": "float32", "_type": "Value"},
-                    "frame_index": {"dtype": "int64", "_type": "Value"},
-                    "episode_index": {"dtype": "int64", "_type": "Value"},
-                    "index": {"dtype": "int64", "_type": "Value"},
-                    "task_index": {"dtype": "int64", "_type": "Value"},
-                    "done": {"dtype": "bool", "_type": "Value"},
-                    "is_success": {"dtype": "bool", "_type": "Value"},
-                }
-            }
+        hf_features: dict[str, Any] = {
+            "image": {"_type": "Image"},
+            "wrist_image": {"_type": "Image"},
         }
-        schema = schema.with_metadata({"huggingface": json.dumps(hf_features)})
+        for key in self.extra_image_keys:
+            hf_features[key] = {"_type": "Image"}
+        hf_features.update({
+            "state": {
+                "feature": {"dtype": "float32", "_type": "Value"},
+                "length": self.state_dim,
+                "_type": "Sequence",
+            },
+            "actions": {
+                "feature": {"dtype": "float32", "_type": "Value"},
+                "length": self.action_dim,
+                "_type": "Sequence",
+            },
+            "timestamp": {"dtype": "float32", "_type": "Value"},
+            "frame_index": {"dtype": "int64", "_type": "Value"},
+            "episode_index": {"dtype": "int64", "_type": "Value"},
+            "index": {"dtype": "int64", "_type": "Value"},
+            "task_index": {"dtype": "int64", "_type": "Value"},
+            "done": {"dtype": "bool", "_type": "Value"},
+            "is_success": {"dtype": "bool", "_type": "Value"},
+        })
+        schema = schema.with_metadata(
+            {"huggingface": json.dumps({"info": {"features": hf_features}})}
+        )
         return schema
 
     def _create_parquet_table(
         self, data: dict[str, list], schema: pa.Schema
     ) -> pa.Table:
         """Create a PyArrow table."""
-        arrays = {
+        arrays: dict[str, pa.Array] = {
             "image": pa.array(data["image"], type=schema.field("image").type),
             "wrist_image": pa.array(
                 data["wrist_image"], type=schema.field("wrist_image").type
             ),
+        }
+        for key in self.extra_image_keys:
+            arrays[key] = pa.array(data[key], type=schema.field(key).type)
+        arrays.update({
             "state": pa.array(data["state"], type=schema.field("state").type),
             "actions": pa.array(data["actions"], type=schema.field("actions").type),
             "timestamp": pa.array(data["timestamp"], type=pa.float32()),
@@ -453,7 +438,7 @@ class LeRobotDatasetWriter:
             "task_index": pa.array(data["task_index"], type=pa.int64()),
             "done": pa.array(data["done"], type=pa.bool_()),
             "is_success": pa.array(data["is_success"], type=pa.bool_()),
-        }
+        })
         return pa.table(arrays, schema=schema)
 
     def _update_stats_accumulators(
@@ -463,14 +448,14 @@ class LeRobotDatasetWriter:
         states: np.ndarray,
         actions: np.ndarray,
         data: dict[str, list],
+        extra_images: dict[str, np.ndarray] | None = None,
     ) -> None:
         """Update the statistics accumulators."""
         if self.use_incremental_stats:
-            # Use incremental statistics (Welford's algorithm)
-            self._update_stats_incremental(images, wrist_images, states, actions, data)
+            self._update_stats_incremental(
+                images, wrist_images, states, actions, data, extra_images
+            )
         else:
-            # Original approach: accumulate raw data
-            # Images: normalize to [0, 1] before computing statistics
             img_normalized = images.astype(np.float32) / 255.0
             self._stats_accumulators["image"]["values"].append(img_normalized)
 
@@ -479,6 +464,12 @@ class LeRobotDatasetWriter:
                 self._stats_accumulators["wrist_image"]["values"].append(
                     wrist_normalized
                 )
+
+            if extra_images:
+                for key, arr in extra_images.items():
+                    if key in self._stats_accumulators:
+                        normalized = arr.astype(np.float32) / 255.0
+                        self._stats_accumulators[key]["values"].append(normalized)
 
             self._stats_accumulators["state"]["values"].append(states)
             self._stats_accumulators["actions"]["values"].append(actions)
@@ -499,9 +490,9 @@ class LeRobotDatasetWriter:
         states: np.ndarray,
         actions: np.ndarray,
         data: dict[str, list],
+        extra_images: dict[str, np.ndarray] | None = None,
     ) -> None:
         """Incrementally update statistics using Welford's algorithm without storing raw data."""
-        # Image sampling (use only a subset for statistics to reduce computation)
         T = len(images)
         sample_size = max(1, int(T * self.stats_sample_ratio))
         sample_indices = np.random.choice(T, sample_size, replace=False)
@@ -512,11 +503,15 @@ class LeRobotDatasetWriter:
             sampled_wrist = wrist_images[sample_indices].astype(np.float32) / 255.0
             self._update_running_stats_array("wrist_image", sampled_wrist)
 
-        # Use all data for state/action
+        if extra_images:
+            for key, arr in extra_images.items():
+                if key in self._stats_accumulators:
+                    sampled = arr[sample_indices].astype(np.float32) / 255.0
+                    self._update_running_stats_array(key, sampled)
+
         self._update_running_stats_array("state", states)
         self._update_running_stats_array("actions", actions)
 
-        # Scalar statistics
         for key, values in [
             ("timestamp", data["timestamp"]),
             ("frame_index", data["frame_index"]),
@@ -586,35 +581,25 @@ class LeRobotDatasetWriter:
         """Compute statistics from accumulated raw data (original approach)."""
         stats = {}
 
-        # Image stats (per channel)
-        if self._stats_accumulators["image"]["values"]:
-            all_images = np.concatenate(
-                self._stats_accumulators["image"]["values"], axis=0
-            )
-            stats["image"] = self._compute_image_stats(all_images)
+        for img_key in ["image", "wrist_image"] + self.extra_image_keys:
+            acc = self._stats_accumulators.get(img_key, {})
+            values = acc.get("values", [])
+            if values:
+                all_imgs = np.concatenate(values, axis=0)
+                stats[img_key] = self._compute_image_stats(all_imgs)
 
-        # Wrist image stats
-        if self._stats_accumulators["wrist_image"]["values"]:
-            all_wrist = np.concatenate(
-                self._stats_accumulators["wrist_image"]["values"], axis=0
-            )
-            stats["wrist_image"] = self._compute_image_stats(all_wrist)
-
-        # State stats
         if self._stats_accumulators["state"]["values"]:
             all_states = np.concatenate(
                 self._stats_accumulators["state"]["values"], axis=0
             )
             stats["state"] = self._compute_array_stats(all_states)
 
-        # Actions stats
         if self._stats_accumulators["actions"]["values"]:
             all_actions = np.concatenate(
                 self._stats_accumulators["actions"]["values"], axis=0
             )
             stats["actions"] = self._compute_array_stats(all_actions)
 
-        # Scalar stats
         for key in ["timestamp", "frame_index", "episode_index", "index", "task_index"]:
             values = self._stats_accumulators[key]["values"]
             if values:
@@ -632,10 +617,10 @@ class LeRobotDatasetWriter:
         """Compute statistics from Welford accumulators (incremental mode)."""
         stats = {}
 
-        # Array-type statistics (image, wrist_image, state, actions)
-        for key in ["image", "wrist_image", "state", "actions"]:
-            acc = self._stats_accumulators[key]
-            if acc["count"] == 0:
+        image_keys = {"image", "wrist_image"} | set(self.extra_image_keys)
+        for key in ["image", "wrist_image"] + self.extra_image_keys + ["state", "actions"]:
+            acc = self._stats_accumulators.get(key)
+            if acc is None or acc["count"] == 0:
                 continue
 
             n = acc["count"]
@@ -643,16 +628,14 @@ class LeRobotDatasetWriter:
             variance = (acc["sum_sq"] / n) - (mean**2)
             std = np.sqrt(np.maximum(variance, 0))
 
-            if key in ["image", "wrist_image"]:
-                # Image stats need special format: per-channel with nested structure
+            if key in image_keys:
                 stats[key] = {
-                    "mean": [[[float(m)]] for m in mean],  # [[[ ]]] per channel
+                    "mean": [[[float(m)]] for m in mean],
                     "std": [[[float(s)]] for s in std],
                     "max": [[[float(m)]] for m in acc["max"]],
                     "min": [[[float(m)]] for m in acc["min"]],
                 }
             else:
-                # State/actions: per-dimension
                 stats[key] = {
                     "mean": mean.tolist(),
                     "std": std.tolist(),
@@ -660,7 +643,6 @@ class LeRobotDatasetWriter:
                     "min": acc["min"].tolist(),
                 }
 
-        # Scalar statistics
         for key in ["timestamp", "frame_index", "episode_index", "index", "task_index"]:
             acc = self._stats_accumulators[key]
             if acc["count"] == 0:
@@ -723,6 +705,44 @@ class LeRobotDatasetWriter:
         total_episodes = len(self._episodes)
         total_chunks = (total_episodes + self.chunks_size - 1) // self.chunks_size
 
+        features: dict[str, Any] = {
+            "image": {
+                "dtype": "image",
+                "shape": list(self.image_shape),
+                "names": ["height", "width", "channel"],
+            },
+            "wrist_image": {
+                "dtype": "image",
+                "shape": list(self.image_shape),
+                "names": ["height", "width", "channel"],
+            },
+        }
+        for key in self.extra_image_keys:
+            features[key] = {
+                "dtype": "image",
+                "shape": list(self.image_shape),
+                "names": ["height", "width", "channel"],
+            }
+        features.update({
+            "state": {
+                "dtype": "float32",
+                "shape": [self.state_dim],
+                "names": ["state"],
+            },
+            "actions": {
+                "dtype": "float32",
+                "shape": [self.action_dim],
+                "names": ["actions"],
+            },
+            "timestamp": {"dtype": "float32", "shape": [1], "names": None},
+            "frame_index": {"dtype": "int64", "shape": [1], "names": None},
+            "episode_index": {"dtype": "int64", "shape": [1], "names": None},
+            "index": {"dtype": "int64", "shape": [1], "names": None},
+            "task_index": {"dtype": "int64", "shape": [1], "names": None},
+            "done": {"dtype": "bool", "shape": [1], "names": None},
+            "is_success": {"dtype": "bool", "shape": [1], "names": None},
+        })
+
         info = {
             "codebase_version": self.codebase_version,
             "robot_type": self.robot_type,
@@ -735,35 +755,7 @@ class LeRobotDatasetWriter:
             "fps": self.fps,
             "splits": {"train": f"0:{total_episodes}"},
             "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
-            "features": {
-                "image": {
-                    "dtype": "image",
-                    "shape": list(self.image_shape),
-                    "names": ["height", "width", "channel"],
-                },
-                "wrist_image": {
-                    "dtype": "image",
-                    "shape": list(self.image_shape),
-                    "names": ["height", "width", "channel"],
-                },
-                "state": {
-                    "dtype": "float32",
-                    "shape": [self.state_dim],
-                    "names": ["state"],
-                },
-                "actions": {
-                    "dtype": "float32",
-                    "shape": [self.action_dim],
-                    "names": ["actions"],
-                },
-                "timestamp": {"dtype": "float32", "shape": [1], "names": None},
-                "frame_index": {"dtype": "int64", "shape": [1], "names": None},
-                "episode_index": {"dtype": "int64", "shape": [1], "names": None},
-                "index": {"dtype": "int64", "shape": [1], "names": None},
-                "task_index": {"dtype": "int64", "shape": [1], "names": None},
-                "done": {"dtype": "bool", "shape": [1], "names": None},
-                "is_success": {"dtype": "bool", "shape": [1], "names": None},
-            },
+            "features": features,
         }
 
         with open(os.path.join(meta_dir, "info.json"), "w") as f:
