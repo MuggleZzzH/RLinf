@@ -33,9 +33,9 @@ OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-/mnt/project_rlinf_hs/Jiahao/results/isaac
 # Dataset path can be either:
 # 1) <HF_LEROBOT_HOME>/<repo_id>, which contains meta/info.json
 # 2) HF_LEROBOT_HOME parent directory
-DATASET_PATH="${DATASET_PATH:-/mnt/qiyuan/zhy/isaaclab_data/generated_simdata_full}"
-DATASET_REPO_ID="${DATASET_REPO_ID:-generated_simdata_full}"
-CONFIG_NAME="${CONFIG_NAME:-pi0_isaaclab}"
+DATASET_PATH="${DATASET_PATH:-/mnt/project_rlinf_hs/Jiahao/IsaacLab-Stack-Cube-Data}"
+DATASET_REPO_ID="${DATASET_REPO_ID:-IsaacLab-Stack-Cube-Data}"
+CONFIG_NAME="${CONFIG_NAME:-pi0_isaaclab_newdata_sft50}"
 
 # Optional RLinf .pt checkpoint (or a dir containing full_weights.pt / full_weigths.pt).
 CKPT_INPUT="${CKPT_INPUT:-null}"

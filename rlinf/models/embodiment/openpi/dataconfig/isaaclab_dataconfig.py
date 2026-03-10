@@ -32,6 +32,7 @@ class LeRobotIsaaclabDataConfig(DataConfigFactory):
     """Data config for IsaacLab LeRobot-format datasets."""
 
     extra_delta_transform: bool = False
+    base_image_key: str = "observation.images.table"
 
     @override
     def create(
@@ -41,7 +42,7 @@ class LeRobotIsaaclabDataConfig(DataConfigFactory):
             inputs=[
                 _transforms.RepackTransform(
                     {
-                        "observation/image": "observation.images.table",
+                        "observation/image": self.base_image_key,
                         "observation/wrist_image": "observation.images.wrist",
                         "observation/state": "observation.state",
                         "actions": "action",

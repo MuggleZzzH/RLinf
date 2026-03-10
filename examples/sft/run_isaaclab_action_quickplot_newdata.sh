@@ -28,9 +28,9 @@ RUN_NAME="${RUN_NAME:-isaaclab_action_quickplot_newdata}"
 RESULT_ROOT="${RESULT_ROOT:-${REPO_PATH}/result/isaaclab_openpi_newdata/action_quickplot}"
 
 OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-/mnt/project_rlinf_hs/Jiahao/results/isaaclab_sft/isaaclab_stack_cube_sft_2048/checkpoints/global_step_30000/actor/model_state_dict}"
-DATASET_PATH="${DATASET_PATH:-/mnt/qiyuan/zhy/isaaclab_data/generated_simdata_full}"
-DATASET_REPO_ID="${DATASET_REPO_ID:-generated_simdata_full}"
-CONFIG_NAME="${CONFIG_NAME:-pi0_isaaclab}"
+DATASET_PATH="${DATASET_PATH:-/mnt/project_rlinf_hs/Jiahao/IsaacLab-Stack-Cube-Data}"
+DATASET_REPO_ID="${DATASET_REPO_ID:-IsaacLab-Stack-Cube-Data}"
+CONFIG_NAME="${CONFIG_NAME:-pi0_isaaclab_newdata_sft50}"
 
 CKPT_INPUT="${CKPT_INPUT:-null}"
 STATE_DICT_KEY="${STATE_DICT_KEY:-}"

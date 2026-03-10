@@ -21,7 +21,9 @@ from omegaconf import DictConfig
 
 def _filter_isaaclab_norm_stats(config_name: str, norm_stats):
     """Keep only policy-relevant stats for IsaacLab to avoid selector mismatches."""
-    if config_name != "pi0_isaaclab" or not isinstance(norm_stats, dict):
+    if not isinstance(norm_stats, dict):
+        return norm_stats
+    if not isinstance(config_name, str) or not config_name.startswith("pi0_isaaclab"):
         return norm_stats
 
     allow_prefixes = (

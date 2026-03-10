@@ -1,5 +1,10 @@
 # IsaacLab OpenPI Dense Reward Guide
 
+> Legacy note: the default IsaacLab stack-cube flow in this branch now follows the
+> GR00T-style `Isaac-Stack-Cube-Franka-IK-Rel-Visuomotor-Rewarded-v0` setup and
+> uses the environment-provided reward directly. The staged dense reward design
+> below is retained only as historical reference for past experiments.
+
 This document describes the dense reward design used by
 `IsaaclabStackCubeEnv` for OpenPI RL training.
 

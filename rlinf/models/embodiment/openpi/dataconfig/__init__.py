@@ -133,6 +133,38 @@ _CONFIGS = [
         num_train_steps=30_000,
     ),
     TrainConfig(
+        name="pi0_isaaclab_newdata",
+        model=pi0_config.Pi0Config(action_horizon=10),
+        data=LeRobotIsaaclabDataConfig(
+            repo_id="IsaacLab-Stack-Cube-Data",
+            base_image_key="observation.images.front",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_isaaclab/assets"),
+            extra_delta_transform=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "checkpoints/jax/pi0_base/params"
+        ),
+        pytorch_weight_path="checkpoints/torch/pi0_base",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi0_isaaclab_newdata_sft50",
+        model=pi0_config.Pi0Config(action_horizon=50),
+        data=LeRobotIsaaclabDataConfig(
+            repo_id="IsaacLab-Stack-Cube-Data",
+            base_image_key="observation.images.front",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_isaaclab/assets"),
+            extra_delta_transform=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "checkpoints/jax/pi0_base/params"
+        ),
+        pytorch_weight_path="checkpoints/torch/pi0_base",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
         name="pi05_maniskill",
         model=pi0_config.Pi0Config(
             pi05=True, action_horizon=10, discrete_state_input=False

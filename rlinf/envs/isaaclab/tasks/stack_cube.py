@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
 import gymnasium as gym
 import torch
 
@@ -21,12 +23,11 @@ from ..isaaclab_env import IsaaclabBaseEnv
 
 
 class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
-    DEFAULT_REWARD_TERM_KEYS = (
-        "reward/grasp_red",
-        "reward/stack_red_blue",
-        "reward/grasp_green",
-        "reward/success",
-        "reward/fail_drop",
+    """Thin IsaacLab stack-cube wrapper aligned with the GR00T IsaacLab flow."""
+
+    ENV_ID_ALIASES = (
+        "Isaac-Stack-Cube-Franka-IK-Rel-Visuomotor-Rewarded-v0",
+        "Isaac-Stack-Cube-Franka-IK-Rel-Visuomotor-v0",
     )
 
     def __init__(
@@ -44,305 +45,148 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
             total_num_processes,
             worker_info,
         )
-        reward_cfg = getattr(cfg, "reward_cfg", None)
-        reward_terms_cfg = getattr(reward_cfg, "rewards", None)
-        self.enable_dense_reward = bool(
-            getattr(reward_cfg, "enable_dense_reward", False)
+        self.main_cam_cfg = self._build_main_cam_cfg(cfg.init_params)
+
+    @staticmethod
+    def _cfg_get(cfg, key, default=None):
+        if cfg is None:
+            return default
+        if hasattr(cfg, "get"):
+            return cfg.get(key, default)
+        return getattr(cfg, key, default)
+
+    @staticmethod
+    def _dedupe_keys(keys):
+        deduped = []
+        for key in keys:
+            if key and key not in deduped:
+                deduped.append(key)
+        return deduped
+
+    @classmethod
+    def _build_main_cam_cfg(cls, init_params):
+        main_cam_cfg = cls._cfg_get(init_params, "main_cam")
+        if main_cam_cfg is None:
+            table_cam_cfg = cls._cfg_get(init_params, "table_cam")
+            return {
+                "height": table_cam_cfg.height,
+                "width": table_cam_cfg.width,
+                "scene_keys": ["table_cam", "front_cam"],
+                "obs_keys": ["table_cam", "front_cam"],
+            }
+
+        return {
+            "height": main_cam_cfg.height,
+            "width": main_cam_cfg.width,
+            "scene_keys": cls._dedupe_keys(
+                [
+                    cls._cfg_get(main_cam_cfg, "scene_key"),
+                    cls._cfg_get(main_cam_cfg, "fallback_scene_key"),
+                    "table_cam",
+                    "front_cam",
+                ]
+            ),
+            "obs_keys": cls._dedupe_keys(
+                [
+                    cls._cfg_get(main_cam_cfg, "obs_key"),
+                    cls._cfg_get(main_cam_cfg, "fallback_obs_key"),
+                    "table_cam",
+                    "front_cam",
+                ]
+            ),
+        }
+
+    @staticmethod
+    def _get_first_attr(obj, keys):
+        for key in keys:
+            if hasattr(obj, key):
+                return getattr(obj, key)
+        raise AttributeError(f"None of the candidate camera keys exist on scene: {keys}")
+
+    @staticmethod
+    def _get_first_item(mapping, keys):
+        for key in keys:
+            if key in mapping:
+                return mapping[key]
+        raise KeyError(
+            f"None of the candidate camera keys exist in policy obs: {keys}; "
+            f"available={sorted(mapping.keys())}"
         )
-        self.enable_stage_gating = bool(getattr(reward_cfg, "enable_stage_gating", True))
-        self.drop_height_threshold = float(
-            getattr(reward_cfg, "drop_height_threshold", -0.05)
-        )
-        self.reward_grasp_red = float(getattr(reward_terms_cfg, "grasp_red", 0.10))
-        self.reward_stack_red_blue = float(
-            getattr(reward_terms_cfg, "stack_red_blue", 0.25)
-        )
-        self.reward_grasp_green = float(getattr(reward_terms_cfg, "grasp_green", 0.10))
-        self.reward_success = float(getattr(reward_terms_cfg, "success", 1.00))
-        self.reward_fail_drop = float(getattr(reward_terms_cfg, "fail_drop", -0.30))
-        self._reward_term_keys = self.DEFAULT_REWARD_TERM_KEYS
+
+    def _resolve_env_cfg(self, load_cfg_from_registry):
+        candidate_ids = [self.isaaclab_env_id] + [
+            env_id for env_id in self.ENV_ID_ALIASES if env_id != self.isaaclab_env_id
+        ]
+        last_error = None
+        for env_id in candidate_ids:
+            try:
+                env_cfg = load_cfg_from_registry(env_id, "env_cfg_entry_point")
+                return env_id, env_cfg
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+        raise RuntimeError(
+            f"Unable to resolve IsaacLab task id from aliases: {candidate_ids}"
+        ) from last_error
 
     def _make_env_function(self):
-        """
-        function for make isaaclab
-        """
+        """Build the IsaacLab stack-cube task with camera overrides."""
 
         def make_env_isaaclab():
-            from isaaclab.app import AppLauncher
+            # Force headless mode even if the host shell exported DISPLAY.
+            os.environ.pop("DISPLAY", None)
 
-            sim_app = AppLauncher(headless=True, enable_cameras=True).app
+            from isaaclab.app import AppLauncher
             from isaaclab_tasks.utils import load_cfg_from_registry
 
-            isaac_env_cfg = load_cfg_from_registry(
-                self.isaaclab_env_id, "env_cfg_entry_point"
+            sim_app = AppLauncher(headless=True, enable_cameras=True).app
+            resolved_env_id, isaac_env_cfg = self._resolve_env_cfg(
+                load_cfg_from_registry
             )
-            isaac_env_cfg.scene.num_envs = (
-                self.cfg.init_params.num_envs
-            )  # default 4096 ant_env_spaces.pkl
 
+            isaac_env_cfg.scene.num_envs = self.cfg.init_params.num_envs
             isaac_env_cfg.scene.wrist_cam.height = self.cfg.init_params.wrist_cam.height
             isaac_env_cfg.scene.wrist_cam.width = self.cfg.init_params.wrist_cam.width
-            isaac_env_cfg.scene.table_cam.height = self.cfg.init_params.table_cam.height
-            isaac_env_cfg.scene.table_cam.width = self.cfg.init_params.table_cam.width
+            main_cam = self._get_first_attr(
+                isaac_env_cfg.scene, self.main_cam_cfg["scene_keys"]
+            )
+            main_cam.height = self.main_cam_cfg["height"]
+            main_cam.width = self.main_cam_cfg["width"]
 
             env = gym.make(
-                self.isaaclab_env_id, cfg=isaac_env_cfg, render_mode="rgb_array"
+                resolved_env_id, cfg=isaac_env_cfg, render_mode="rgb_array"
             ).unwrapped
             return env, sim_app
 
         return make_env_isaaclab
 
-    def _init_metrics(self):
-        super()._init_metrics()
-        reward_term_keys = getattr(self, "_reward_term_keys", self.DEFAULT_REWARD_TERM_KEYS)
-        self._reward_term_keys = reward_term_keys
-        self._stage_grasp_red_done = torch.zeros(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        self._stage_stack_red_blue_done = torch.zeros(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        self._stage_grasp_green_done = torch.zeros(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        self._stage_success_done = torch.zeros(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        self._stage_fail_drop_done = torch.zeros(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        self._reward_term_returns = {
-            key: torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-            for key in reward_term_keys
-        }
-        self._episode_success_term = torch.zeros(
-            self.num_envs, dtype=torch.float32, device=self.device
-        )
-        self._episode_fail_drop_term = torch.zeros(
-            self.num_envs, dtype=torch.float32, device=self.device
-        )
-        self._episode_other_termination_term = torch.zeros(
-            self.num_envs, dtype=torch.float32, device=self.device
-        )
-
-    def _reset_metrics(self, env_idx=None):
-        super()._reset_metrics(env_idx)
-        if env_idx is not None:
-            mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-            mask[env_idx] = True
-            self._stage_grasp_red_done[mask] = False
-            self._stage_stack_red_blue_done[mask] = False
-            self._stage_grasp_green_done[mask] = False
-            self._stage_success_done[mask] = False
-            self._stage_fail_drop_done[mask] = False
-            for key in self._reward_term_keys:
-                self._reward_term_returns[key][mask] = 0.0
-            self._episode_success_term[mask] = 0.0
-            self._episode_fail_drop_term[mask] = 0.0
-            self._episode_other_termination_term[mask] = 0.0
-        else:
-            self._stage_grasp_red_done[:] = False
-            self._stage_stack_red_blue_done[:] = False
-            self._stage_grasp_green_done[:] = False
-            self._stage_success_done[:] = False
-            self._stage_fail_drop_done[:] = False
-            for key in self._reward_term_keys:
-                self._reward_term_returns[key][:] = 0.0
-            self._episode_success_term[:] = 0.0
-            self._episode_fail_drop_term[:] = 0.0
-            self._episode_other_termination_term[:] = 0.0
-
-    def _to_bool_tensor(self, value):
-        if value is None:
-            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        if not isinstance(value, torch.Tensor):
-            value = torch.as_tensor(value, device=self.device)
-        value = value.to(self.device)
-        if value.ndim > 1 and value.shape[-1] == 1:
-            value = value.squeeze(-1)
-        if value.dtype != torch.bool:
-            value = value > 0.5
-        return value
-
-    def _get_stage_signals(self, raw_obs):
-        subtask_terms = raw_obs.get("subtask_terms", {})
-        return {
-            "grasp_red": self._to_bool_tensor(subtask_terms.get("grasp_1")),
-            "stack_red_blue": self._to_bool_tensor(subtask_terms.get("stack_1")),
-            "grasp_green": self._to_bool_tensor(subtask_terms.get("grasp_2")),
-        }
-
-    def _compute_cubes_stacked(self, raw_obs):
-        cube_positions = raw_obs.get("policy", {}).get("cube_positions")
-        if cube_positions is None:
-            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        cube_positions = cube_positions.to(self.device)
-        cube_1 = cube_positions[:, 0:3]
-        cube_2 = cube_positions[:, 3:6]
-        cube_3 = cube_positions[:, 6:9]
-
-        pos_diff_c12 = cube_1 - cube_2
-        pos_diff_c23 = cube_2 - cube_3
-
-        xy_dist_c12 = torch.linalg.vector_norm(pos_diff_c12[:, :2], dim=1)
-        xy_dist_c23 = torch.linalg.vector_norm(pos_diff_c23[:, :2], dim=1)
-        h_dist_c12 = torch.abs(pos_diff_c12[:, 2])
-        h_dist_c23 = torch.abs(pos_diff_c23[:, 2])
-
-        stacked = torch.logical_and(xy_dist_c12 < 0.04, xy_dist_c23 < 0.04)
-        stacked = torch.logical_and(torch.abs(h_dist_c12 - 0.0468) < 0.005, stacked)
-        stacked = torch.logical_and(pos_diff_c12[:, 2] < 0.0, stacked)
-        stacked = torch.logical_and(torch.abs(h_dist_c23 - 0.0468) < 0.005, stacked)
-        stacked = torch.logical_and(pos_diff_c23[:, 2] < 0.0, stacked)
-        return stacked
-
-    def _get_success_fail_signals(self, raw_obs, terminations):
-        cube_positions = raw_obs.get("policy", {}).get("cube_positions")
-        if cube_positions is None:
-            dropped = torch.zeros_like(terminations, dtype=torch.bool)
-        else:
-            cube_positions = cube_positions.to(self.device)
-            cube_z = cube_positions[:, 2::3]
-            dropped = (cube_z < self.drop_height_threshold).any(dim=1)
-        stacked = self._compute_cubes_stacked(raw_obs)
-        success_terminated = terminations & stacked
-        fail_drop = terminations & dropped
-        other_termination = terminations & (~success_terminated) & (~fail_drop)
-        return success_terminated, fail_drop, other_termination
-
     def step(self, actions=None, auto_reset=True):
-        raw_obs, _, terminations, truncations, infos = self.env.step(actions)
+        raw_obs, step_reward, terminations, truncations, _ = self.env.step(actions)
+
+        step_reward = step_reward.clone()
         terminations = terminations.clone()
         truncations = truncations.clone()
-        success_terminated, fail_drop, other_termination = self._get_success_fail_signals(
-            raw_obs, terminations
-        )
-
-        reward_scale = float(self.cfg.reward_coef)
-        reward_terms = {
-            "reward/grasp_red": torch.zeros(
-                self.num_envs, dtype=torch.float32, device=self.device
-            ),
-            "reward/stack_red_blue": torch.zeros(
-                self.num_envs, dtype=torch.float32, device=self.device
-            ),
-            "reward/grasp_green": torch.zeros(
-                self.num_envs, dtype=torch.float32, device=self.device
-            ),
-            "reward/success": torch.zeros(
-                self.num_envs, dtype=torch.float32, device=self.device
-            ),
-            "reward/fail_drop": torch.zeros(
-                self.num_envs, dtype=torch.float32, device=self.device
-            ),
-        }
-        step_reward = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
-
-        if self.enable_dense_reward:
-            stage_signals = self._get_stage_signals(raw_obs)
-            if self.enable_stage_gating:
-                grasp_red_reached = self._stage_grasp_red_done | stage_signals["grasp_red"]
-                stack_red_blue_reached = (
-                    self._stage_stack_red_blue_done | stage_signals["stack_red_blue"]
-                )
-                new_grasp_red = stage_signals["grasp_red"] & (~self._stage_grasp_red_done)
-                new_stack_red_blue = (
-                    stage_signals["stack_red_blue"]
-                    & grasp_red_reached
-                    & (~self._stage_stack_red_blue_done)
-                )
-                new_grasp_green = (
-                    stage_signals["grasp_green"]
-                    & stack_red_blue_reached
-                    & (~self._stage_grasp_green_done)
-                )
-            else:
-                new_grasp_red = stage_signals["grasp_red"] & (~self._stage_grasp_red_done)
-                new_stack_red_blue = (
-                    stage_signals["stack_red_blue"] & (~self._stage_stack_red_blue_done)
-                )
-                new_grasp_green = (
-                    stage_signals["grasp_green"] & (~self._stage_grasp_green_done)
-                )
-
-            new_success = success_terminated & (~self._stage_success_done)
-            new_fail_drop = fail_drop & (~self._stage_fail_drop_done)
-
-            reward_terms["reward/grasp_red"] = (
-                reward_scale * self.reward_grasp_red * new_grasp_red.float()
-            )
-            reward_terms["reward/stack_red_blue"] = (
-                reward_scale * self.reward_stack_red_blue * new_stack_red_blue.float()
-            )
-            reward_terms["reward/grasp_green"] = (
-                reward_scale * self.reward_grasp_green * new_grasp_green.float()
-            )
-            reward_terms["reward/success"] = (
-                reward_scale * self.reward_success * new_success.float()
-            )
-            reward_terms["reward/fail_drop"] = (
-                reward_scale * self.reward_fail_drop * new_fail_drop.float()
-            )
-
-            step_reward = (
-                reward_terms["reward/grasp_red"]
-                + reward_terms["reward/stack_red_blue"]
-                + reward_terms["reward/grasp_green"]
-                + reward_terms["reward/success"]
-                + reward_terms["reward/fail_drop"]
-            )
-
-            self._stage_grasp_red_done |= stage_signals["grasp_red"]
-            self._stage_stack_red_blue_done |= stage_signals["stack_red_blue"]
-            self._stage_grasp_green_done |= stage_signals["grasp_green"]
-            self._stage_success_done |= success_terminated
-            self._stage_fail_drop_done |= fail_drop
-        else:
-            # Sparse baseline only rewards true task success (not every termination).
-            reward_terms["reward/success"] = reward_scale * success_terminated.float()
-            step_reward = reward_terms["reward/success"]
-
-        for key in self._reward_term_keys:
-            self._reward_term_returns[key] += reward_terms[key]
-        self._episode_success_term += success_terminated.float()
-        self._episode_fail_drop_term += fail_drop.float()
-        self._episode_other_termination_term += other_termination.float()
-
-        reward_terms_for_log = {
-            key: self._reward_term_returns[key] for key in self._reward_term_keys
-        }
-        reward_terms_for_log.update(
-            {f"{key}/step": value for key, value in reward_terms.items()}
-        )
-        reward_terms_for_log["event/success_terminated"] = self._episode_success_term
-        reward_terms_for_log["event/fail_drop_terminated"] = self._episode_fail_drop_term
-        reward_terms_for_log["event/other_terminated"] = (
-            self._episode_other_termination_term
-        )
 
         if self.video_cfg.save_video:
             self.images.append(self.add_image(raw_obs))
 
         obs = self._wrap_obs(raw_obs)
-
         self._elapsed_steps += 1
 
         truncations = (self.elapsed_steps >= self.cfg.max_episode_steps) | truncations
-
         dones = terminations | truncations
+        success_flags = terminations & (step_reward > 0)
 
         infos = self._record_metrics(
             step_reward=step_reward,
             terminations=terminations,
             infos={},
-            success_flags=success_terminated,
-            reward_terms=reward_terms_for_log,
+            success_flags=success_flags,
         )
         if self.ignore_terminations:
-            infos["episode"]["success_at_end"] = success_terminated
+            infos["episode"]["success_at_end"] = success_flags
             terminations[:] = False
 
-        _auto_reset = auto_reset and self.auto_reset  # always False
+        _auto_reset = auto_reset and self.auto_reset
         if dones.any() and _auto_reset:
             obs, infos = self._handle_auto_reset(dones, obs, infos)
 
@@ -353,13 +197,14 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
             truncations,
             infos,
         )
-    
 
     def _wrap_obs(self, obs):
         instruction = [self.task_description] * self.num_envs
         wrist_image = obs["policy"]["wrist_cam"]
-        table_image = obs["policy"]["table_cam"]
-        quat = obs["policy"]["eef_quat"][:, [1, 2, 3, 0]]
+        main_image = self._get_first_item(obs["policy"], self.main_cam_cfg["obs_keys"])
+        quat = obs["policy"]["eef_quat"][
+            :, [1, 2, 3, 0]
+        ]  # IsaacLab stores quaternion as wxyz.
         states = torch.concatenate(
             [
                 obs["policy"]["eef_pos"],
@@ -370,7 +215,7 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
         )
 
         env_obs = {
-            "main_images": table_image,
+            "main_images": main_image,
             "task_descriptions": instruction,
             "states": states,
             "wrist_images": wrist_image,
@@ -378,5 +223,6 @@ class IsaaclabStackCubeEnv(IsaaclabBaseEnv):
         return env_obs
 
     def add_image(self, obs):
-        img = obs["policy"]["table_cam"][0].cpu().numpy()
-        return img
+        return self._get_first_item(obs["policy"], self.main_cam_cfg["obs_keys"])[
+            0
+        ].cpu().numpy()

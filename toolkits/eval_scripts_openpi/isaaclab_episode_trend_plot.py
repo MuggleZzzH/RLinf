@@ -253,9 +253,21 @@ def _discover_prompt(dataset_root: pathlib.Path, override: str) -> str:
                     if isinstance(value, str) and value:
                         return value
                 break
-    return (
-        "Pick up the red cube and place it on top of the blue cube, "
-        "then pick up the green cube and place it on top of the red cube."
+    return "Stack the red block on the blue block, then stack the green block on the red block."
+
+
+def _discover_main_video_key(dataset_root: pathlib.Path) -> str:
+    candidates = (
+        "observation.images.front",
+        "observation.images.table",
+    )
+    video_root = dataset_root / "videos" / "chunk-000"
+    for key in candidates:
+        if (video_root / key).exists():
+            return key
+    raise FileNotFoundError(
+        f"No supported main-camera folder found under {video_root}. "
+        f"Tried: {', '.join(candidates)}."
     )
 
 
@@ -301,14 +313,16 @@ def _select_episode_ids(args: argparse.Namespace, available_ids: list[int]) -> l
     return sorted([int(x) for x in chosen.tolist()])
 
 
-def _episode_paths(dataset_root: pathlib.Path, episode_id: int) -> dict[str, pathlib.Path]:
+def _episode_paths(
+    dataset_root: pathlib.Path, episode_id: int, main_video_key: str
+) -> dict[str, pathlib.Path]:
     epi_name = f"episode_{episode_id:06d}"
     return {
         "parquet": dataset_root / "data" / "chunk-000" / f"{epi_name}.parquet",
-        "table_video": dataset_root
+        "main_video": dataset_root
         / "videos"
         / "chunk-000"
-        / "observation.images.table"
+        / main_video_key
         / f"{epi_name}.mp4",
         "wrist_video": dataset_root
         / "videos"
@@ -322,8 +336,9 @@ def _load_episode_arrays(
     dataset_root: pathlib.Path,
     episode_id: int,
     max_frames: int,
+    main_video_key: str,
 ) -> dict[str, np.ndarray]:
-    paths = _episode_paths(dataset_root, episode_id)
+    paths = _episode_paths(dataset_root, episode_id, main_video_key)
     if not paths["parquet"].exists():
         raise FileNotFoundError(f"Parquet not found: {paths['parquet']}")
     df = pd.read_parquet(paths["parquet"])
@@ -335,10 +350,10 @@ def _load_episode_arrays(
 
     states = np.stack(df["observation.state"].to_numpy(), axis=0).astype(np.float32)
     actions = np.stack(df["action"].to_numpy(), axis=0).astype(np.float32)
-    table_frames = _read_video_frames(paths["table_video"]).astype(np.uint8)
+    main_frames = _read_video_frames(paths["main_video"]).astype(np.uint8)
     wrist_frames = _read_video_frames(paths["wrist_video"]).astype(np.uint8)
 
-    length = min(states.shape[0], actions.shape[0], table_frames.shape[0], wrist_frames.shape[0])
+    length = min(states.shape[0], actions.shape[0], main_frames.shape[0], wrist_frames.shape[0])
     if max_frames > 0:
         length = min(length, max_frames)
     if length <= 0:
@@ -347,7 +362,7 @@ def _load_episode_arrays(
     return {
         "states": states[:length],
         "actions": actions[:length],
-        "table_frames": table_frames[:length],
+        "main_frames": main_frames[:length],
         "wrist_frames": wrist_frames[:length],
     }
 
@@ -356,7 +371,7 @@ def _predict_episode_chunk_actions(
     model: Any,
     states: np.ndarray,
     gt_actions: np.ndarray,
-    table_frames: np.ndarray,
+    main_frames: np.ndarray,
     wrist_frames: np.ndarray,
     prompt: str,
     infer_batch_size: int,
@@ -383,7 +398,7 @@ def _predict_episode_chunk_actions(
         # OpenPI action model expects tensor inputs in env_obs.
         env_obs = {
             "main_images": torch.from_numpy(
-                np.ascontiguousarray(table_frames[batch_starts])
+                np.ascontiguousarray(main_frames[batch_starts])
             ),
             "wrist_images": torch.from_numpy(
                 np.ascontiguousarray(wrist_frames[batch_starts])
@@ -656,6 +671,7 @@ def main() -> None:
 
     selected_episode_ids = _select_episode_ids(args, available_episode_ids)
     prompt = _discover_prompt(dataset_root, args.prompt)
+    main_video_key = _discover_main_video_key(dataset_root)
 
     model_cfg = build_model_cfg(args)
     model = get_model(model_cfg)
@@ -683,12 +699,17 @@ def main() -> None:
     episode_results: list[dict[str, Any]] = []
     pbar = tqdm(selected_episode_ids, desc="Episode trend eval", dynamic_ncols=True)
     for episode_id in pbar:
-        arrays = _load_episode_arrays(dataset_root, episode_id, max_frames=args.max_frames)
+        arrays = _load_episode_arrays(
+            dataset_root,
+            episode_id,
+            max_frames=args.max_frames,
+            main_video_key=main_video_key,
+        )
         true_chunks, pred_chunks, chunk_starts = _predict_episode_chunk_actions(
             model=model,
             states=arrays["states"],
             gt_actions=arrays["actions"],
-            table_frames=arrays["table_frames"],
+            main_frames=arrays["main_frames"],
             wrist_frames=arrays["wrist_frames"],
             prompt=prompt,
             infer_batch_size=args.infer_batch_size,
@@ -739,6 +760,7 @@ def main() -> None:
         "selected_episode_ids": selected_episode_ids,
         "sampling_mode": "manual" if args.episode_ids else "random",
         "random_seed": args.random_seed if not args.episode_ids else None,
+        "main_video_key": main_video_key,
         "infer_batch_size": args.infer_batch_size,
         "action_chunk": args.num_action_chunks,
         "max_frames": args.max_frames,

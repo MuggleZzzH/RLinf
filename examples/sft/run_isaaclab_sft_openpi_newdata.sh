@@ -28,8 +28,8 @@ RESULT_ROOT="${RESULT_ROOT:-${REPO_PATH}/result/isaaclab_openpi_newdata/sft}"
 
 # Required: OpenPI base/SFT model directory (contains safetensors + norm stats)
 OPENPI_MODEL_DIR="${OPENPI_MODEL_DIR:-/mnt/project_rlinf_hs/Jiahao/RLinf/checkpoints/torch/pi0_base}"
-DATASET_PATH="${DATASET_PATH:-/mnt/qiyuan/zhy/isaaclab_data/generated_simdata_full}"
-DATASET_REPO_ID="${DATASET_REPO_ID:-generated_simdata_full}"
+DATASET_PATH="${DATASET_PATH:-/mnt/project_rlinf_hs/Jiahao/IsaacLab-Stack-Cube-Data}"
+DATASET_REPO_ID="${DATASET_REPO_ID:-IsaacLab-Stack-Cube-Data}"
 
 # Optional: resume from RLinf SFT checkpoint directory: .../checkpoints/global_step_x/actor
 RESUME_DIR="${RESUME_DIR:-null}"

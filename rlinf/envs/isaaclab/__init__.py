@@ -15,6 +15,7 @@
 from .tasks.stack_cube import IsaaclabStackCubeEnv
 
 REGISTER_ISAACLAB_ENVS = {
+    "Isaac-Stack-Cube-Franka-IK-Rel-Visuomotor-Rewarded-v0": IsaaclabStackCubeEnv,
     "Isaac-Stack-Cube-Franka-IK-Rel-Visuomotor-v0": IsaaclabStackCubeEnv,
 }
 
