@@ -234,28 +234,11 @@ def load_policy_rlinf(
 
     model.paligemma_with_expert.to_bfloat16_for_selected_params("bfloat16")
 
-    # Data config and norm_stats — same as get_model but with fallback
     data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
 
-    norm_stats = None
-    if data_config.asset_id is not None:
-        try:
-            norm_stats = _checkpoints.load_norm_stats(
-                checkpoint_dir, data_config.asset_id
-            )
-            logger.info("norm_stats loaded from checkpoint dir")
-        except Exception:
-            logger.warning("norm_stats not in checkpoint dir, trying assets_dirs ...")
-            try:
-                norm_stats = _checkpoints.load_norm_stats(
-                    train_config.assets_dirs, data_config.asset_id
-                )
-                logger.info("norm_stats loaded from assets_dirs")
-            except Exception:
-                logger.error(
-                    "norm_stats NOT FOUND. "
-                    "Normalize/Unnormalize will be SKIPPED — actions will be WRONG."
-                )
+    if data_config.asset_id is None:
+        raise ValueError("Asset id is required to load norm stats.")
+    norm_stats = _checkpoints.load_norm_stats(checkpoint_dir, data_config.asset_id)
 
     if torch.cuda.is_available():
         device = "cuda"
@@ -271,20 +254,12 @@ def load_policy_rlinf(
             *repack_transforms.inputs,
             transforms.InjectDefaultPrompt(default_prompt),
             *data_config.data_transforms.inputs,
-            *(
-                [transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm)]
-                if norm_stats is not None
-                else []
-            ),
+            transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
             *data_config.model_transforms.inputs,
         ],
         output_transforms=[
             *data_config.model_transforms.outputs,
-            *(
-                [transforms.Unnormalize(norm_stats, use_quantiles=data_config.use_quantile_norm)]
-                if norm_stats is not None
-                else []
-            ),
+            transforms.Unnormalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
             *data_config.data_transforms.outputs,
             *repack_transforms.outputs,
         ],
