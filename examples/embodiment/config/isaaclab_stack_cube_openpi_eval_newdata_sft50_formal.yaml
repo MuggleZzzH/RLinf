@@ -1,0 +1,33 @@
+defaults:
+  - isaaclab_stack_cube_openpi_eval_newdata
+  - _self_
+
+runner:
+  logger:
+    experiment_name: "isaaclab_stack_cube_openpi_eval_newdata_sft50_formal"
+
+algorithm:
+  # Match the formal GR00T-style evaluation protocol: fixed reset set, repeated
+  # eval rollouts, and a deterministic rollout horizon that aligns with action chunk.
+  eval_rollout_epoch: 3
+
+env:
+  eval:
+    total_num_envs: 32
+    # Keep rollout horizon divisible by the action chunk to avoid implicit floor truncation.
+    max_episode_steps: 450
+    max_steps_per_rollout_epoch: 450
+    auto_reset: True
+    ignore_terminations: True
+    use_fixed_reset_state_ids: True
+    video_cfg:
+      save_video: True
+      info_on_video: True
+      fps: 20
+      video_base_dir: ${runner.logger.log_path}/video/eval
+
+actor:
+  model:
+    num_action_chunks: 50
+    openpi:
+      config_name: "pi0_isaaclab_newdata_sft50"
