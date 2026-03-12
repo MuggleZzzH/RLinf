@@ -6,6 +6,107 @@ EMBODIED_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_PATH="$(dirname "$(dirname "$EMBODIED_PATH")")"
 SRC_FILE="${EMBODIED_PATH}/eval_embodied_agent.py"
 RUNTIME_SETUP_FILE="${REPO_PATH}/examples/common/setup_isaaclab_runtime.sh"
+ISAACLAB_CONDA_SETUP_DEFAULT="${ISAACLAB_CONDA_SETUP:-/mnt/qiyuan/zhy/nv_rlinf/IsaacLab/_isaac_sim/setup_conda_env.sh}"
+
+activate_launcher_venv() {
+    local repo_path="$1"
+    local target_venv="${RLINF_VENV_PATH:-}"
+
+    if [ -z "${target_venv}" ] && [ -f "${repo_path}/.venv/bin/activate" ]; then
+        target_venv="${repo_path}/.venv"
+    fi
+    if [ -z "${target_venv}" ] && [ -f "/mnt/project_rlinf_hs/Jiahao/RLinf/.venv/bin/activate" ]; then
+        target_venv="/mnt/project_rlinf_hs/Jiahao/RLinf/.venv"
+    fi
+    if [ -z "${target_venv}" ]; then
+        echo "[launcher-env] failed to locate a usable venv. Set RLINF_VENV_PATH=/path/to/.venv."
+        exit 1
+    fi
+
+    export RLINF_VENV_PATH="${target_venv}"
+    if [ "${VIRTUAL_ENV:-}" = "${target_venv}" ]; then
+        echo "[launcher-env] using active venv: ${VIRTUAL_ENV}"
+        return
+    fi
+
+    # shellcheck disable=SC1090
+    source "${target_venv}/bin/activate"
+    echo "[launcher-env] activated venv: ${target_venv}"
+}
+
+append_unique_pythonpath() {
+    local path_to_add="$1"
+    if [ ! -d "${path_to_add}" ]; then
+        return
+    fi
+    case ":${PYTHONPATH:-}:" in
+        *":${path_to_add}:"*) ;;
+        *) export PYTHONPATH="${path_to_add}${PYTHONPATH:+:${PYTHONPATH}}" ;;
+    esac
+}
+
+ensure_isaaclab_modules() {
+    local missing_modules=()
+    local module_name
+    for module_name in isaaclab isaaclab_tasks; do
+        if ! python - "${module_name}" <<'PY' >/dev/null 2>&1
+import importlib
+import sys
+importlib.import_module(sys.argv[1])
+PY
+        then
+            missing_modules+=("${module_name}")
+        fi
+    done
+
+    if [ "${#missing_modules[@]}" -eq 0 ]; then
+        echo "[launcher-env] verified python modules: isaaclab isaaclab_tasks"
+        return
+    fi
+
+    local isaaclab_repo_root="${ISAACLAB_REPO_PATH:-}"
+    if [ -z "${isaaclab_repo_root}" ] && [ -f "${ISAACLAB_CONDA_SETUP_DEFAULT}" ]; then
+        isaaclab_repo_root="$(cd "$(dirname "${ISAACLAB_CONDA_SETUP_DEFAULT}")/.." && pwd)"
+    fi
+
+    local package_dir
+    for package_dir in \
+        "${isaaclab_repo_root}/source/isaaclab" \
+        "${isaaclab_repo_root}/source/isaaclab_tasks" \
+        "${isaaclab_repo_root}/source/isaaclab_assets" \
+        "${isaaclab_repo_root}/source/isaaclab_mimic" \
+        "${isaaclab_repo_root}/source/isaaclab_rl"; do
+        append_unique_pythonpath "${package_dir}"
+    done
+
+    missing_modules=()
+    for module_name in isaaclab isaaclab_tasks; do
+        if ! python - "${module_name}" <<'PY' >/dev/null 2>&1
+import importlib
+import sys
+importlib.import_module(sys.argv[1])
+PY
+        then
+            missing_modules+=("${module_name}")
+        fi
+    done
+
+    if [ "${#missing_modules[@]}" -eq 0 ]; then
+        echo "[launcher-env] verified python modules after PYTHONPATH patch: isaaclab isaaclab_tasks"
+        return
+    fi
+
+    echo "[launcher-env] missing required python modules: ${missing_modules[*]}"
+    echo "[launcher-env] python executable: $(python -c 'import sys; print(sys.executable)')"
+    echo "[launcher-env] PYTHONPATH: ${PYTHONPATH:-}"
+    if [ -n "${isaaclab_repo_root}" ]; then
+        echo "[launcher-env] IsaacLab repo root: ${isaaclab_repo_root}"
+        echo "[launcher-env] If needed, run: cd ${isaaclab_repo_root} && ./isaaclab.sh --install none"
+    fi
+    exit 1
+}
+
+activate_launcher_venv "${REPO_PATH}"
 
 if [ -f "${RUNTIME_SETUP_FILE}" ]; then
     # shellcheck disable=SC1090
@@ -20,6 +121,8 @@ export REPO_PATH
 export EMBODIED_PATH
 export PYTHONPATH="${REPO_PATH}:${PYTHONPATH:-}"
 export HYDRA_FULL_ERROR=1
+
+ensure_isaaclab_modules
 
 CONFIG_NAME="${CONFIG_NAME:-isaaclab_stack_cube_openpi_eval_newdata}"
 RUN_NAME="${RUN_NAME:-isaaclab_openpi_eval_newdata}"
