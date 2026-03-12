@@ -58,7 +58,7 @@ cluster:
       #   RLINF_NODE_RANK=1 ray start --address=<server_ip>:6379
       env_configs:
         - node_ranks: 1
-          python_interpreter_path: /home/franka/workspace/RLinf/.venv/bin/python3  # Replace
+          python_interpreter_path: /home/franka/cyn_ws/RLinf/.venv/bin/python3  # Replace
 
 runner:
   task_type: embodied
