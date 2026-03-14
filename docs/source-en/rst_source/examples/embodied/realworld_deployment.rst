@@ -343,8 +343,7 @@ Sync the collected dataset to the remote training server:
      (e.g. ``my-server`` or ``user@192.168.1.100``)
    - ``<REMOTE_RLINF_PATH>`` — path to RLinf on the remote server
      (e.g. ``/workspace/RLinf``)
-   - ``<DATASET_REPO_ID>`` — dataset identifier
-     (e.g. ``<user>/<dataset>``)
+   - ``<DATASET_REPO_ID>`` — dataset directory name (e.g. ``realworld_pnp``), i.e. the subdirectory under ``dataset/``
 
 4.2 Convert norm_stats
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -360,26 +359,27 @@ server, generate it from ``stats.json``:
        --select-state-dims 4 5 6 7 8 9 0 \
        --action-dim 32
 
-**Concrete example:** Suppose your dataset identifier is ``alice/pick_place_chip``
-and the Pi0 pre-trained weights are at ``/workspace/RLinf/checkpoints/torch/pi0_base``:
+**Concrete example:** When using the ``pi0_realworld_pnp`` config, its built-in
+``repo_id`` is ``realworld_pnp``, so ``<DATASET_REPO_ID>`` must be set to
+``realworld_pnp``:
 
 .. code-block:: bash
 
-   # Dataset path: /workspace/RLinf/dataset/alice/pick_place_chip/meta/stats.json
-   # norm_stats output: /workspace/RLinf/checkpoints/torch/pi0_base/alice/pick_place_chip/norm_stats.json
+   # Dataset stats.json path: dataset/realworld_pnp/meta/stats.json
+   # norm_stats output: checkpoints/torch/pi0_base/realworld_pnp/norm_stats.json
 
    python toolkits/convert_stats_to_norm_stats.py \
-       --stats-json dataset/alice/pick_place_chip/meta/stats.json \
-       --output-dir checkpoints/torch/pi0_base/alice/pick_place_chip \
+       --stats-json dataset/realworld_pnp/meta/stats.json \
+       --output-dir checkpoints/torch/pi0_base/realworld_pnp \
        --select-state-dims 4 5 6 7 8 9 0 \
        --action-dim 32
 
 .. note::
 
-   **Path convention:** ``<DATASET_REPO_ID>`` should use the ``<username>/<dataset_name>``
-   format (e.g. ``alice/pick_place_chip``). ``--output-dir`` must be the model checkpoint
-   path plus a ``<DATASET_REPO_ID>`` subdirectory — OpenPI locates ``norm_stats.json``
-   automatically through this path convention.
+   **Path convention:** ``<DATASET_REPO_ID>`` **must** match the ``repo_id`` in the
+   OpenPI config (``pi0_realworld_pnp`` → ``realworld_pnp``). OpenPI locates
+   ``norm_stats.json`` via ``<model_path>/<repo_id>/norm_stats.json``. A mismatch
+   will cause a ``FileNotFoundError`` during model loading.
 
 Arguments:
 
@@ -633,21 +633,18 @@ env worker) and the NUC (FrankaController).
 6.1 Transfer Checkpoint to the 4090 Server
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Sync the trained checkpoint from the A100 to the 4090 server:
+Sync the trained checkpoint **and norm_stats** from the A100 to the 4090 server:
 
 .. code-block:: bash
 
-   # Preserve directory structure — rsync the entire global_step directory
+   # 1. Sync checkpoint (from global_step_<N>/ level to preserve directory structure)
    rsync -avhzP <REMOTE_HOST>:<REMOTE_RLINF_PATH>/logs/<timestamp>/test_openpi/checkpoints/global_step_<N>/ \
        /path/to/RLinf/checkpoints/realworld_pnp/
 
-.. note::
-
-   Rsync from the ``global_step_<N>/`` level (not ``actor/model_state_dict/``) to
-   preserve the ``actor/model_state_dict/full_weights.pt`` directory structure. The
-   code searches for weights in this order: ``<dir>/full_weights.pt``,
-   ``<dir>/model_state_dict/full_weights.pt``,
-   ``<dir>/actor/model_state_dict/full_weights.pt``, ``<dir>/*.safetensors``.
+   # 2. Sync norm_stats (training checkpoint does not include this file; copy separately)
+   mkdir -p /path/to/RLinf/checkpoints/realworld_pnp/realworld_pnp/
+   rsync -avhzP <REMOTE_HOST>:<REMOTE_RLINF_PATH>/checkpoints/torch/pi0_base/realworld_pnp/norm_stats.json \
+       /path/to/RLinf/checkpoints/realworld_pnp/realworld_pnp/norm_stats.json
 
 6.2 Deployment Config
 ~~~~~~~~~~~~~~~~~~~~~

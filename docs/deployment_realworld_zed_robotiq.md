@@ -279,7 +279,7 @@ rsync -avhzP logs/<timestamp>/lerobot_dataset/ \
 >
 > - `<REMOTE_HOST>`：远端服务器 SSH 别名或 `user@ip:port` 格式（如 `my-server` 或 `user@192.168.1.100`）
 > - `<REMOTE_RLINF_PATH>`：远端 RLinf 仓库路径（如 `/workspace/RLinf` 或 `/mnt/data/RLinf`）
-> - `<DATASET_REPO_ID>`：数据集标识（如 `<user>/<dataset>`）
+> - `<DATASET_REPO_ID>`：数据集目录名（如 `realworld_pnp`），即存放在 `dataset/` 下的子目录名
 
 ### 4.2 转换 norm_stats
 
@@ -293,20 +293,20 @@ python toolkits/convert_stats_to_norm_stats.py \
     --action-dim 32
 ```
 
-**具体示例：** 假设你的数据集标识为 `alice/pick_place_chip`，Pi0 预训练权重在 `/workspace/RLinf/checkpoints/torch/pi0_base`：
+**具体示例：** 使用 `pi0_realworld_pnp` 配置时，其内置的 `repo_id` 为 `realworld_pnp`，所以 `<DATASET_REPO_ID>` 必须设为 `realworld_pnp`：
 
 ```bash
-# 数据集路径：/workspace/RLinf/dataset/alice/pick_place_chip/meta/stats.json
-# norm_stats 输出：/workspace/RLinf/checkpoints/torch/pi0_base/alice/pick_place_chip/norm_stats.json
+# 数据集 stats.json 路径：dataset/realworld_pnp/meta/stats.json
+# norm_stats 输出：checkpoints/torch/pi0_base/realworld_pnp/norm_stats.json
 
 python toolkits/convert_stats_to_norm_stats.py \
-    --stats-json dataset/alice/pick_place_chip/meta/stats.json \
-    --output-dir checkpoints/torch/pi0_base/alice/pick_place_chip \
+    --stats-json dataset/realworld_pnp/meta/stats.json \
+    --output-dir checkpoints/torch/pi0_base/realworld_pnp \
     --select-state-dims 4 5 6 7 8 9 0 \
     --action-dim 32
 ```
 
-> **路径规范：** `<DATASET_REPO_ID>` 应采用 `<用户名>/<数据集名>` 格式（如 `alice/pick_place_chip`）。`--output-dir` 必须是模型 checkpoint 路径 + `<DATASET_REPO_ID>` 子目录，OpenPI 通过这个路径约定自动查找 `norm_stats.json`。
+> **路径规范：** `<DATASET_REPO_ID>` **必须**与 OpenPI 配置中的 `repo_id` 一致（`pi0_realworld_pnp` 对应 `realworld_pnp`）。OpenPI 通过 `<model_path>/<repo_id>/norm_stats.json` 路径查找归一化统计。如果两者不匹配，模型加载时会报 `FileNotFoundError`。
 
 参数说明：
 
@@ -474,15 +474,18 @@ uv run torchrun --standalone --nnodes=1 --nproc_per_node=8 \
 
 ### 6.1 传输 checkpoint 到 4090 服务器
 
-将 A100 训练好的 checkpoint 同步到 4090 服务器：
+将 A100 训练好的 checkpoint 和 norm_stats 同步到 4090 服务器：
 
 ```bash
-# 保留目录结构，rsync 整个 global_step 目录
+# 1. 同步 checkpoint（从 global_step_<N>/ 层级开始，保留目录结构）
 rsync -avhzP <REMOTE_HOST>:<REMOTE_RLINF_PATH>/logs/<timestamp>/test_openpi/checkpoints/global_step_<N>/ \
     /path/to/RLinf/checkpoints/realworld_pnp/
-```
 
-> **注意：** 需要从 `global_step_<N>/` 层级开始 rsync（而非 `actor/model_state_dict/`），以保留 `actor/model_state_dict/full_weights.pt` 的目录结构。代码会按 `<dir>/full_weights.pt`、`<dir>/model_state_dict/full_weights.pt`、`<dir>/actor/model_state_dict/full_weights.pt`、`<dir>/*.safetensors` 的顺序查找权重文件。
+# 2. 同步 norm_stats（训练 checkpoint 不含此文件，需单独复制）
+mkdir -p /path/to/RLinf/checkpoints/realworld_pnp/realworld_pnp/
+rsync -avhzP <REMOTE_HOST>:<REMOTE_RLINF_PATH>/checkpoints/torch/pi0_base/realworld_pnp/norm_stats.json \
+    /path/to/RLinf/checkpoints/realworld_pnp/realworld_pnp/norm_stats.json
+```
 
 ### 6.2 部署配置
 
