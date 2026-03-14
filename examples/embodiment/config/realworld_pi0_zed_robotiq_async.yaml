@@ -58,7 +58,7 @@ cluster:
       #   RLINF_NODE_RANK=1 ray start --address=<server_ip>:6379
       env_configs:
         - node_ranks: 1
-          python_interpreter_path: /home/franka/cyn_ws/RLinf/.venv/bin/python3  # Replace
+          python_interpreter_path: /home/franka/cynws/RLinf/.venv/bin/python3  # Replace
 
 runner:
   task_type: embodied
@@ -181,7 +181,7 @@ actor:
   enable_offload: True
 
   model:
-    model_path: "/path/to/model"    # Replace with Pi0 checkpoint path
+    model_path: "/home/user/cyn_ws/RLinf/checkpoints/realworld_pnp/"    # Replace with Pi0 checkpoint path
     num_action_chunks: 4
     state_dim: 19
     action_dim: 7
