@@ -7,13 +7,18 @@ REPO_PATH="$(dirname "$(dirname "$SFT_PATH")")"
 RUNTIME_SETUP_FILE="${REPO_PATH}/examples/common/setup_isaaclab_runtime.sh"
 PLOT_FILE="${REPO_PATH}/toolkits/eval_scripts_openpi/isaaclab_action_quickplot.py"
 
-if [ -f "${RUNTIME_SETUP_FILE}" ]; then
-    # shellcheck disable=SC1090
-    source "${RUNTIME_SETUP_FILE}"
-    setup_isaaclab_runtime "${REPO_PATH}"
+USE_ISAACLAB_RUNTIME="${USE_ISAACLAB_RUNTIME:-0}"
+if [ "${USE_ISAACLAB_RUNTIME}" = "1" ]; then
+    if [ -f "${RUNTIME_SETUP_FILE}" ]; then
+        # shellcheck disable=SC1090
+        source "${RUNTIME_SETUP_FILE}"
+        setup_isaaclab_runtime "${REPO_PATH}"
+    else
+        echo "Runtime setup file not found: ${RUNTIME_SETUP_FILE}"
+        exit 1
+    fi
 else
-    echo "Runtime setup file not found: ${RUNTIME_SETUP_FILE}"
-    exit 1
+    echo "[offline-eval] Skip IsaacLab runtime setup (USE_ISAACLAB_RUNTIME=0)."
 fi
 
 if [ ! -f "${PLOT_FILE}" ]; then

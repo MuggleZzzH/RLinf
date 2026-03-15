@@ -65,6 +65,7 @@ class OpenPi0Config(Pi0Config):
     add_value_head: bool = False  # add value head for ppo
     value_after_vlm: bool = False  # value after vlm, pi05 mode
     value_vlm_mode: str = "mean_token"  # last_token, mean_token, first_token
+    binarize_gripper_on_eval: bool = False  # apply eval-only binary gripper postprocess
 
     # ===== DSRL-specific parameters =====
     use_dsrl: bool = False  # Enable DSRL algorithm
@@ -234,6 +235,22 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
 
     def set_global_step(self, global_step):
         self.global_step = global_step
+
+    def _maybe_binarize_gripper(self, actions: np.ndarray, mode: str) -> np.ndarray:
+        """Apply an eval-only binary gripper postprocess for IsaacLab-style 7D actions."""
+        if (
+            mode != "eval"
+            or not self.config.binarize_gripper_on_eval
+            or "isaaclab" not in self.config.config_name
+            or actions.shape[-1] < 1
+        ):
+            return actions
+
+        binarized_actions = np.array(actions, copy=True)
+        binarized_actions[..., -1] = np.where(
+            binarized_actions[..., -1] >= 0.0, 1.0, -1.0
+        )
+        return binarized_actions
 
     def setup_wrappers(
         self,
@@ -495,6 +512,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
             actions = self.output_transform(
                 {"actions": outputs["actions"], "state": observation.state}
             )["actions"].numpy()
+            actions = self._maybe_binarize_gripper(actions, mode)
             prev_logprobs = outputs["prev_logprobs"]
             prev_values = outputs["prev_values"]
             forward_action = None

@@ -40,6 +40,8 @@ WANDB_EXP_NAME="${WANDB_EXP_NAME:-${RUN_NAME}}"
 # This launcher only sets runtime paths/logging, not core algorithm/env knobs.
 # If you need temporary local overrides, pass them via EXTRA_HYDRA_ARGS.
 EXTRA_HYDRA_ARGS="${EXTRA_HYDRA_ARGS:-}"
+BINARIZE_GRIPPER_ON_EVAL="${BINARIZE_GRIPPER_ON_EVAL:-0}"
+ISAACLAB_ENV_ID_OVERRIDE="${ISAACLAB_ENV_ID_OVERRIDE:-}"
 
 resolve_ckpt_path() {
     local input_path="$1"
@@ -185,6 +187,15 @@ CMD=(
     "runner.logger.experiment_name=${WANDB_EXP_NAME}"
     "runner.logger.logger_backends=${LOGGER_BACKENDS}"
 )
+
+if [ "${BINARIZE_GRIPPER_ON_EVAL}" = "1" ]; then
+    CMD+=("+actor.model.openpi.binarize_gripper_on_eval=true")
+fi
+
+if [ -n "${ISAACLAB_ENV_ID_OVERRIDE}" ]; then
+    CMD+=("env.train.init_params.id=${ISAACLAB_ENV_ID_OVERRIDE}")
+    CMD+=("env.eval.init_params.id=${ISAACLAB_ENV_ID_OVERRIDE}")
+fi
 
 if [ -n "${EXTRA_HYDRA_ARGS}" ]; then
     # shellcheck disable=SC2206
