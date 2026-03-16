@@ -53,6 +53,7 @@ class EmbodiedEvalRunner:
         self.metric_logger = MetricLogger(cfg)
 
         self.logger = get_logger()
+        self.eval_num_tests = max(1, int(cfg.runner.get("eval_num_tests", 1)))
 
     def init_workers(self):
         self.rollout.init_worker().wait()
@@ -86,9 +87,35 @@ class EmbodiedEvalRunner:
         return eval_metrics
 
     def run(self):
-        eval_metrics = self.evaluate()
-        eval_metrics = {f"eval/{k}": v for k, v in eval_metrics.items()}
-        self.logger.info(eval_metrics)
-        self.metric_logger.log(step=0, data=eval_metrics)
+        aggregated_sums: dict[str, float] = {}
+        total_trajectories = 0.0
+
+        for test_idx in range(self.eval_num_tests):
+            eval_metrics = self.evaluate()
+            num_trajectories = float(eval_metrics.get("num_trajectories", 0))
+            total_trajectories += num_trajectories
+
+            for key, value in eval_metrics.items():
+                if key == "num_trajectories":
+                    continue
+                aggregated_sums[key] = aggregated_sums.get(key, 0.0) + float(value) * max(
+                    num_trajectories, 1.0
+                )
+
+            test_metrics = {f"eval_test/{k}": v for k, v in eval_metrics.items()}
+            test_metrics["eval_test/index"] = test_idx
+            self.logger.info(test_metrics)
+            self.metric_logger.log(step=test_idx, data=test_metrics)
+
+        final_metrics = {
+            key: aggregated_sums[key] / total_trajectories
+            for key in aggregated_sums
+            if total_trajectories > 0
+        }
+        final_metrics["num_trajectories"] = total_trajectories
+        final_metrics["num_tests"] = self.eval_num_tests
+        final_metrics = {f"eval/{k}": v for k, v in final_metrics.items()}
+        self.logger.info(final_metrics)
+        self.metric_logger.log(step=self.eval_num_tests, data=final_metrics)
 
         self.metric_logger.finish()

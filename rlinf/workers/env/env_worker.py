@@ -766,6 +766,8 @@ class EnvWorker(Worker):
 
     def evaluate(self, input_channel: Channel, output_channel: Channel):
         eval_metrics = defaultdict(list)
+        stop_on_episode_end = self.cfg.runner.get("eval_stop_on_episode_end", False)
+        stop_eval = False
 
         for eval_rollout_epoch in range(self.cfg.algorithm.eval_rollout_epoch):
             if not self.cfg.env.eval.auto_reset or eval_rollout_epoch == 0:
@@ -800,6 +802,18 @@ class EnvWorker(Worker):
                     for key, value in env_info.items():
                         eval_metrics[key].append(value)
 
+                    if stop_on_episode_end and env_info:
+                        self.send_env_batch(
+                            output_channel,
+                            {
+                                "stop_eval": True,
+                                "batch_size": self.eval_num_envs_per_stage,
+                            },
+                            mode="eval",
+                        )
+                        stop_eval = True
+                        break
+
                     if self.cfg.env.eval.auto_reset:
                         if (
                             eval_rollout_epoch
@@ -819,8 +833,12 @@ class EnvWorker(Worker):
                         },
                         mode="eval",
                     )
+                if stop_eval:
+                    break
 
             self.finish_rollout(mode="eval")
+            if stop_eval:
+                break
         for stage_id in range(self.stage_num):
             if self.cfg.env.eval.get("enable_offload", False) and hasattr(
                 self.eval_env_list[stage_id], "offload"

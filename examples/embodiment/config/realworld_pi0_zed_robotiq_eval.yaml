@@ -71,6 +71,8 @@ runner:
   max_steps: 1
 
   only_eval: True
+  eval_num_tests: 5
+  eval_stop_on_episode_end: True
   val_check_interval: -1
   save_interval: -1
 

@@ -331,6 +331,7 @@ class MultiStepRolloutWorker(Worker):
     ):
         if self.enable_offload:
             self.reload_model()
+        stop_eval = False
         for eval_rollout_epoch_idx in tqdm(
             range(self.cfg.algorithm.eval_rollout_epoch),
             desc="Evaluating Rollout Epochs",
@@ -339,6 +340,9 @@ class MultiStepRolloutWorker(Worker):
             for eval_step_idx in range(self.n_eval_chunk_steps):
                 for stage_idx in range(self.num_pipeline_stages):
                     env_output = await self.recv_env_output(input_channel, mode="eval")
+                    if env_output.get("stop_eval", False):
+                        stop_eval = True
+                        break
                     actions, _ = self.predict(env_output["obs"], mode="eval")
                     if (
                         self.log_eval_actions
@@ -360,6 +364,10 @@ class MultiStepRolloutWorker(Worker):
                                 f"stage={stage_idx}): {action_payload['actions']}"
                             )
                     self.send_chunk_actions(output_channel, actions, mode="eval")
+                if stop_eval:
+                    break
+            if stop_eval:
+                break
 
         if self.enable_offload:
             self.offload_model()
@@ -431,6 +439,8 @@ class MultiStepRolloutWorker(Worker):
 
     @staticmethod
     def _infer_env_batch_size(obs_batch: dict[str, Any]) -> int:
+        if obs_batch.get("stop_eval", False):
+            return int(obs_batch.get("batch_size", 1))
         obs = obs_batch["obs"] if "obs" in obs_batch else obs_batch
         for key in ("states", "main_images", "task_descriptions"):
             value = obs.get(key)
@@ -444,6 +454,8 @@ class MultiStepRolloutWorker(Worker):
     def _merge_obs_batches(obs_batches: list[dict[str, Any]]) -> dict[str, Any]:
         if not obs_batches:
             return {}
+        if any(obs_batch.get("stop_eval", False) for obs_batch in obs_batches):
+            return {"stop_eval": True}
         obs_dicts = [
             obs_batch["obs"] if "obs" in obs_batch else obs_batch
             for obs_batch in obs_batches
