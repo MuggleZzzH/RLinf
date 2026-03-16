@@ -151,6 +151,9 @@ env:
       is_dummy: false
       max_num_steps: 300
       enable_gripper_penalty: False
+      # Match the teleoperation/data-collection action semantics used to create
+      # the Pi0 dataset. The policy outputs delta actions in that same scale.
+      action_scale: [1.0, 1.0, 1.0]
 
     task_description: null
 
@@ -172,6 +175,7 @@ env:
       is_dummy: false
       max_num_steps: 300
       enable_gripper_penalty: False
+      action_scale: [1.0, 1.0, 1.0]
 
     task_description: null
 
