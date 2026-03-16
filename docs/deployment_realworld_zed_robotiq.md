@@ -116,7 +116,6 @@ cd RLinf
 git checkout feature/real_sft
 ```
 
-
 推荐使用 Docker 镜像，无需手动安装依赖。
 
 ```bash
@@ -156,17 +155,17 @@ cd /workspace/RLinf
 关键配置项：
 
 
-| 配置项                        | 值           | 说明                            |
-| -------------------------- | ----------- | ----------------------------- |
-| `cluster.num_nodes`        | `2`         | 双节点：4090 + NUC                |
-| `env.eval.use_gello`       | `True`      | 使用 GELLO 遥操作                  |
-| `env.eval.use_spacemouse`  | `False`     | 不使用 SpaceMouse                |
-| `runner.num_data_episodes` | `50`        | 采集 50 个 episode               |
+| 配置项                        | 值           | 说明                             |
+| -------------------------- | ----------- | ------------------------------ |
+| `cluster.num_nodes`        | `2`         | 双节点：4090 + NUC                 |
+| `env.eval.use_gello`       | `True`      | 使用 GELLO 遥操作                   |
+| `env.eval.use_spacemouse`  | `False`     | 不使用 SpaceMouse                 |
+| `runner.num_data_episodes` | `50`        | 采集 50 个 episode                |
 | `runner.export_format`     | `"lerobot"` | 输出 LeRobot v2.0 格式（wrapper 专用） |
 | `runner.fps`               | `10`        | 采集帧率 10Hz（wrapper 专用）          |
 | `runner.only_success`      | `True`      | 只保存成功的 episode（wrapper 专用）     |
-| `camera_type`              | `"zed"`     | ZED 相机                        |
-| `gripper_type`             | `"robotiq"` | Robotiq 夹爪                    |
+| `camera_type`              | `"zed"`     | ZED 相机                         |
+| `gripper_type`             | `"robotiq"` | Robotiq 夹爪                     |
 
 
 根据实际情况修改配置文件中的 **相机序列号**、**机械臂 IP**、**夹爪串口**、**GELLO 串口**、**NUC Python 路径** 和 **初始末端位姿** `target_ee_pose`。
@@ -182,7 +181,7 @@ cd /workspace/RLinf
 
 > **关键：环境变量必须在 `ray start` 之前设置！**
 >
-> Ray 在 `ray start` 时**一次性捕获**当前 shell 的所有环境变量（包括 `PATH`、`PYTHONPATH`、`ROS_*` 等）。之后启动的 Ray worker 进程将继承这些值。如果在 `ray start` **之后**才 source ROS 或 venv，NUC 上的 FrankaController 将找不到 ROS / Python 包，报出难以排查的 import 错误。
+> Ray 在 `ray start` 时**一次性捕获**当前 shell 的所有环境变量（包括 `PATH`、`PYTHONPATH`、`ROS_`* 等）。之后启动的 Ray worker 进程将继承这些值。如果在 `ray start` **之后**才 source ROS 或 venv，NUC 上的 FrankaController 将找不到 ROS / Python 包，报出难以排查的 import 错误。
 
 ```bash
 # 1. 激活 ROS 环境（必须在 ray start 之前）
@@ -343,17 +342,17 @@ python toolkits/convert_stats_to_norm_stats.py \
 配置文件中的 `train_data_paths` 和 `model_path` 是占位符，需替换为实际路径。关键训练参数：
 
 
-| 参数                               | 配置文件默认值                  | 建议值（8卡）       | 说明                                                    |
-| -------------------------------- | ------------------------ | -------------- | ----------------------------------------------------- |
-| `data.train_data_paths`          | `"/path/to/custom-data"` | 数据集绝对路径        | 如 `"/workspace/RLinf/dataset/<DATASET_REPO_ID>"`       |
-| `actor.model.model_path`         | `"/path/to/pi0-model"`   | Pi0 预训练权重路径    | 如 `"/workspace/RLinf/checkpoints/torch/pi0_base"`      |
-| `actor.model.openpi.config_name` | `"pi0_realworld_pnp"`    | `"pi0_realworld_pnp"` | OpenPI 配置名（ZED+Robotiq 真机场景）                     |
-| `actor.micro_batch_size`         | `1`                      | `16`           | 每卡 batch size，根据 GPU 显存调整                             |
-| `actor.global_batch_size`        | `16`                     | `128`          | 全局 batch size（8 卡 × 16 = 128）                         |
-| `actor.optim.lr`                 | `7.91e-6`                | `2.5e-5`       | 学习率，可根据实际训练调整                                         |
-| `runner.max_steps`               | `-1`（不限制）                | `30000`        | 总训练步数，`-1` 表示按 `max_epochs` 控制                        |
-| `runner.save_interval`           | `10`                     | `1000`         | 每 N 步保存 checkpoint                                    |
-| `actor.model.add_value_head`     | `True`                   | `True`         | 添加 value head（纯 SFT 可设为 `False`）                      |
+| 参数                               | 配置文件默认值                  | 建议值（8卡）               | 说明                                                |
+| -------------------------------- | ------------------------ | --------------------- | ------------------------------------------------- |
+| `data.train_data_paths`          | `"/path/to/custom-data"` | 数据集绝对路径               | 如 `"/workspace/RLinf/dataset/<DATASET_REPO_ID>"`  |
+| `actor.model.model_path`         | `"/path/to/pi0-model"`   | Pi0 预训练权重路径           | 如 `"/workspace/RLinf/checkpoints/torch/pi0_base"` |
+| `actor.model.openpi.config_name` | `"pi0_realworld_pnp"`    | `"pi0_realworld_pnp"` | OpenPI 配置名（ZED+Robotiq 真机场景）                      |
+| `actor.micro_batch_size`         | `1`                      | `16`                  | 每卡 batch size，根据 GPU 显存调整                         |
+| `actor.global_batch_size`        | `16`                     | `128`                 | 全局 batch size（8 卡 × 16 = 128）                     |
+| `actor.optim.lr`                 | `7.91e-6`                | `2.5e-5`              | 学习率，可根据实际训练调整                                     |
+| `runner.max_steps`               | `-1`（不限制）                | `30000`               | 总训练步数，`-1` 表示按 `max_epochs` 控制                    |
+| `runner.save_interval`           | `10`                     | `1000`                | 每 N 步保存 checkpoint                                |
+| `actor.model.add_value_head`     | `True`                   | `True`                | 添加 value head（纯 SFT 可设为 `False`）                  |
 
 
 **启动训练：**
@@ -496,15 +495,15 @@ rsync -avhzP <REMOTE_HOST>:<REMOTE_RLINF_PATH>/checkpoints/torch/pi0_base/realwo
 关键配置项：
 
 
-| 配置项                              | 默认值               | 说明                                    |
-| -------------------------------- | ----------------- | ------------------------------------- |
-| `runner.only_eval`               | `False`           | 设为 `True` 仅评估（不训练）                    |
-| `runner.ckpt_path`               | `null`            | 指向 `.pt` checkpoint 文件路径              |
-| `actor.model.model_path`         | `"/path/to/model"`| Pi0 预训练或微调后的模型路径                      |
-| `rollout.model.model_path`       | `"/path/to/model"`| 与 actor 一致                            |
-| `actor.model.openpi.config_name` | `"pi0_realworld_pnp"` | OpenPI 配置名                       |
-| `env.train.task_description`     | `null`            | 任务描述 prompt（如 `"pick up the chip"`）    |
-| `env.train.keyboard_reward_wrapper` | `"single_stage"` | 键盘控制奖励模式                           |
+| 配置项                                 | 默认值                   | 说明                                  |
+| ----------------------------------- | --------------------- | ----------------------------------- |
+| `runner.only_eval`                  | `False`               | 设为 `True` 仅评估（不训练）                  |
+| `runner.ckpt_path`                  | `null`                | 指向 `.pt` checkpoint 文件路径            |
+| `actor.model.model_path`            | `"/path/to/model"`    | Pi0 预训练或微调后的模型路径                    |
+| `rollout.model.model_path`          | `"/path/to/model"`    | 与 actor 一致                          |
+| `actor.model.openpi.config_name`    | `"pi0_realworld_pnp"` | OpenPI 配置名                          |
+| `env.train.task_description`        | `null`                | 任务描述 prompt（如 `"pick up the chip"`） |
+| `env.train.keyboard_reward_wrapper` | `"single_stage"`      | 键盘控制奖励模式                            |
 
 
 ### 6.3 启动部署
@@ -580,13 +579,14 @@ bash examples/embodiment/run_realworld_async.sh realworld_pi0_zed_robotiq_async 
 ## 附录 A：键盘控制速查表
 
 
-| 场景                                                          | a           | b             | c             |
-| ----------------------------------------------------------- | ----------- | ------------- | ------------- |
-| **数据采集** (`collect_data_with_wrapper.sh`)                   | 开始录制        | 失败并结束 episode | 成功并结束 episode |
+| 场景                                                        | a           | b             | c             |
+| --------------------------------------------------------- | ----------- | ------------- | ------------- |
+| **数据采集** (`collect_data_with_wrapper.sh`)                 | 开始录制        | 失败并结束 episode | 成功并结束 episode |
 | **部署评估 / 在线 RL** (`run_realworld_async.sh`, single_stage) | 中性 (0, 不结束) | 失败 (-1, 结束)   | 成功 (+1, 结束)   |
 
 
 > **注意：**
+>
 > - 数据采集时 `b` = 失败，评估时 `b` = 失败，含义一致；但数据采集时 `a` = 开始录制，评估时 `a` = 中性（无操作），请留意区别。
 > - 键盘控制仅适用于 `collect_data_with_wrapper.sh`（wrapper 版本）。原始 `collect_data.sh`（Replay Buffer 版本）无键盘控制，全程自动录制。
 
@@ -595,26 +595,26 @@ bash examples/embodiment/run_realworld_async.sh realworld_pi0_zed_robotiq_async 
 ## 附录 B：关键文件索引
 
 
-| 文件                                                                   | 作用                                          |
-| -------------------------------------------------------------------- | ------------------------------------------- |
-| `examples/embodiment/config/realworld_collect_data.yaml`             | 数据采集配置（Replay Buffer / RL 训练用）             |
-| `examples/embodiment/config/realworld_collect_data_wrapper.yaml`     | 数据采集配置（LeRobot wrapper / 单节点基础版）           |
-| `examples/embodiment/config/realworld_collect_data_zed_robotiq.yaml` | 数据采集配置（LeRobot wrapper / 双节点 ZED+Robotiq） |
-| `examples/embodiment/config/realworld_pi0_zed_robotiq_async.yaml`    | 真机部署评估 / 在线 RL 配置                          |
-| `examples/embodiment/collect_data.sh`                                | 数据采集启动脚本（Replay Buffer / `.pt` 格式）         |
-| `examples/embodiment/collect_real_data.py`                           | 数据采集 Python 入口（Replay Buffer / RL 训练用）     |
-| `examples/embodiment/collect_data_with_wrapper.sh`                   | 数据采集启动脚本（LeRobot 格式 + 键盘控制）              |
-| `examples/embodiment/collect_real_data_with_wrapper.py`              | 数据采集 Python 入口（CollectEpisode wrapper）     |
-| `examples/embodiment/run_realworld_async.sh`                         | 真机部署 / 在线 RL 启动脚本                           |
-| `examples/embodiment/train_async.py`                                 | 异步训练 / 部署 Python 入口                         |
-| `examples/sft/config/custom_sft_openpi.yaml`                         | RLinf Pi0 SFT 训练配置（含占位符路径，需替换）            |
-| `toolkits/convert_stats_to_norm_stats.py`                            | stats.json → norm_stats.json 转换工具           |
-| `ray_utils/realworld/setup_before_ray.sh`                            | 真机 Ray 启动前环境配置模板                            |
-| `requirements/install.sh`                                            | RLinf 依赖安装脚本                                |
-| `rlinf/models/embodiment/openpi/dataconfig/__init__.py`              | RLinf 侧 `pi0_realworld_pnp` 配置定义             |
-| `openpi/src/openpi/policies/realworld_policy.py`                     | OpenPI 侧 RealworldInputs（需与 RLinf 对齐）       |
+| 文件                                                                   | 作用                                             |
+| -------------------------------------------------------------------- | ---------------------------------------------- |
+| `examples/embodiment/config/realworld_collect_data.yaml`             | 数据采集配置（Replay Buffer / RL 训练用）                 |
+| `examples/embodiment/config/realworld_collect_data_wrapper.yaml`     | 数据采集配置（LeRobot wrapper / 单节点基础版）               |
+| `examples/embodiment/config/realworld_collect_data_zed_robotiq.yaml` | 数据采集配置（LeRobot wrapper / 双节点 ZED+Robotiq）      |
+| `examples/embodiment/config/realworld_pi0_zed_robotiq_async.yaml`    | 真机部署评估 / 在线 RL 配置                              |
+| `examples/embodiment/collect_data.sh`                                | 数据采集启动脚本（Replay Buffer / `.pt` 格式）             |
+| `examples/embodiment/collect_real_data.py`                           | 数据采集 Python 入口（Replay Buffer / RL 训练用）         |
+| `examples/embodiment/collect_data_with_wrapper.sh`                   | 数据采集启动脚本（LeRobot 格式 + 键盘控制）                    |
+| `examples/embodiment/collect_real_data_with_wrapper.py`              | 数据采集 Python 入口（CollectEpisode wrapper）         |
+| `examples/embodiment/run_realworld_async.sh`                         | 真机部署 / 在线 RL 启动脚本                              |
+| `examples/embodiment/train_async.py`                                 | 异步训练 / 部署 Python 入口                            |
+| `examples/sft/config/custom_sft_openpi.yaml`                         | RLinf Pi0 SFT 训练配置（含占位符路径，需替换）                 |
+| `toolkits/convert_stats_to_norm_stats.py`                            | stats.json → norm_stats.json 转换工具              |
+| `ray_utils/realworld/setup_before_ray.sh`                            | 真机 Ray 启动前环境配置模板                               |
+| `requirements/install.sh`                                            | RLinf 依赖安装脚本                                   |
+| `rlinf/models/embodiment/openpi/dataconfig/__init__.py`              | RLinf 侧 `pi0_realworld_pnp` 配置定义               |
+| `openpi/src/openpi/policies/realworld_policy.py`                     | OpenPI 侧 RealworldInputs（需与 RLinf 对齐）          |
 | `openpi/src/openpi/training/config.py`                               | OpenPI 侧 `pi0_realworld_pnp` 训练配置（需与 RLinf 对齐） |
-| `openpi/scripts/train_pytorch.py`                                    | OpenPI 原生 PyTorch 训练入口                      |
+| `openpi/scripts/train_pytorch.py`                                    | OpenPI 原生 PyTorch 训练入口                         |
 
 
 ---
