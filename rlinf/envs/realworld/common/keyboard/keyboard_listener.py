@@ -20,7 +20,7 @@ class KeyboardListener:
         from pynput import keyboard
 
         self.state_lock = threading.Lock()
-        self.latest_data = {"key": None}
+        self.latest_data = {"key": None, "pending_key": None}
 
         self.listener = keyboard.Listener(
             on_press=self.on_key_press, on_release=self.on_key_release
@@ -29,14 +29,18 @@ class KeyboardListener:
         self.last_intervene = 0
 
     def on_key_press(self, key):
+        key_char = key.char if hasattr(key, "char") else str(key)
         with self.state_lock:
-            self.latest_data["key"] = key.char if hasattr(key, "char") else str(key)
+            self.latest_data["key"] = key_char
+            self.latest_data["pending_key"] = key_char
 
     def on_key_release(self, key):
         with self.state_lock:
             self.latest_data["key"] = None
 
     def get_key(self) -> str | None:
-        """Returns the latest key pressed."""
+        """Return and consume the latest keypress event."""
         with self.state_lock:
-            return self.latest_data["key"]
+            pending_key = self.latest_data["pending_key"]
+            self.latest_data["pending_key"] = None
+            return pending_key

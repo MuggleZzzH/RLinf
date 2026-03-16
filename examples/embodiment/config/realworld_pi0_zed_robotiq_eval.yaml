@@ -140,14 +140,14 @@ env:
     keyboard_reward_wrapper: single_stage
     use_spacemouse: False
 
-    max_steps_per_rollout_epoch: 160
-    max_episode_steps: 160
+    max_steps_per_rollout_epoch: 300
+    max_episode_steps: 300
 
     override_cfg:
       target_ee_pose: [0.53, -0.07, 0.2, 3.12, 0.19, 0.24]
       use_dense_reward: False
       is_dummy: false
-      max_num_steps: 160
+      max_num_steps: 300
       enable_gripper_penalty: False
 
     task_description: null
@@ -161,14 +161,14 @@ env:
     keyboard_reward_wrapper: single_stage
     use_spacemouse: False
 
-    max_steps_per_rollout_epoch: 160
-    max_episode_steps: 160
+    max_steps_per_rollout_epoch: 300
+    max_episode_steps: 300
 
     override_cfg:
       target_ee_pose: [0.53, -0.07, 0.2, 3.12, 0.19, 0.24]
       use_dense_reward: False
       is_dummy: false
-      max_num_steps: 160
+      max_num_steps: 300
       enable_gripper_penalty: False
 
     task_description: null
@@ -181,6 +181,8 @@ rollout:
   pipeline_stage_num: 1
   collect_transitions: False
   collect_prev_infos: False
+  log_eval_actions: True
+  eval_action_log_every: 1
 
   sync_weight_nccl_max_ctas: 32
 

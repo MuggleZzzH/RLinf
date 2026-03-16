@@ -80,6 +80,10 @@ class MultiStepRolloutWorker(Worker):
             // cfg.actor.model.num_action_chunks
         )
         self.collect_prev_infos = self.cfg.rollout.get("collect_prev_infos", True)
+        self.log_eval_actions = self.cfg.rollout.get("log_eval_actions", False)
+        self.eval_action_log_every = max(
+            1, int(self.cfg.rollout.get("eval_action_log_every", 1))
+        )
         self.version = 0
         self.finished_episodes = None
 
@@ -319,18 +323,42 @@ class MultiStepRolloutWorker(Worker):
         if self.enable_offload:
             self.offload_model()
 
-    async def evaluate(self, input_channel: Channel, output_channel: Channel):
+    async def evaluate(
+        self,
+        input_channel: Channel,
+        output_channel: Channel,
+        trace_channel: Channel | None = None,
+    ):
         if self.enable_offload:
             self.reload_model()
-        for _ in tqdm(
+        for eval_rollout_epoch_idx in tqdm(
             range(self.cfg.algorithm.eval_rollout_epoch),
             desc="Evaluating Rollout Epochs",
             disable=(self._rank != 0),
         ):
-            for _ in range(self.n_eval_chunk_steps):
-                for _ in range(self.num_pipeline_stages):
+            for eval_step_idx in range(self.n_eval_chunk_steps):
+                for stage_idx in range(self.num_pipeline_stages):
                     env_output = await self.recv_env_output(input_channel, mode="eval")
                     actions, _ = self.predict(env_output["obs"], mode="eval")
+                    if (
+                        self.log_eval_actions
+                        and self._rank == 0
+                        and eval_step_idx % self.eval_action_log_every == 0
+                    ):
+                        action_payload = {
+                            "epoch": eval_rollout_epoch_idx,
+                            "step": eval_step_idx,
+                            "stage": stage_idx,
+                            "actions": actions.detach().cpu().tolist(),
+                        }
+                        if trace_channel is not None:
+                            trace_channel.put(action_payload)
+                        else:
+                            self.log_info(
+                                "Eval actions "
+                                f"(epoch={eval_rollout_epoch_idx}, step={eval_step_idx}, "
+                                f"stage={stage_idx}): {action_payload['actions']}"
+                            )
                     self.send_chunk_actions(output_channel, actions, mode="eval")
 
         if self.enable_offload:

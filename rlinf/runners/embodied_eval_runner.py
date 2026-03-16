@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import typing
+import time
 
 from rlinf.scheduler import Channel
 from rlinf.scheduler import WorkerGroupFuncResult as Handle
@@ -43,6 +44,7 @@ class EmbodiedEvalRunner:
         # Data channels
         self.env_channel = Channel.create("Env")
         self.rollout_channel = Channel.create("Rollout")
+        self.eval_action_channel = Channel.create("EvalAction")
 
         # this timer checks if we should stop training
         self.run_timer = run_timer
@@ -64,7 +66,19 @@ class EmbodiedEvalRunner:
         rollout_handle: Handle = self.rollout.evaluate(
             input_channel=self.env_channel,
             output_channel=self.rollout_channel,
+            trace_channel=self.eval_action_channel,
         )
+        while True:
+            while not self.eval_action_channel.empty():
+                action_trace = self.eval_action_channel.get()
+                self.logger.info(
+                    "Eval action chunk "
+                    f"(epoch={action_trace['epoch']}, step={action_trace['step']}, "
+                    f"stage={action_trace['stage']}): {action_trace['actions']}"
+                )
+            if env_handle.done() and rollout_handle.done() and self.eval_action_channel.empty():
+                break
+            time.sleep(0.05)
         env_results = env_handle.wait()
         rollout_handle.wait()
         eval_metrics_list = [results for results in env_results if results is not None]
