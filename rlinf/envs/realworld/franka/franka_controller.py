@@ -89,7 +89,6 @@ class FrankaController(Worker):
         # Ensure ROS shared libraries and Python packages are discoverable by
         # child processes.  Ray workers using runtime_env with py_executable
         # may not inherit LD_LIBRARY_PATH or PYTHONPATH reliably across nodes.
-        import glob
         import os
         import sys
 
@@ -99,19 +98,15 @@ class FrankaController(Worker):
             os.environ["LD_LIBRARY_PATH"] = (
                 f"{ros_lib}:{ld_path}" if ld_path else ros_lib
             )
-            self._logger.info(
-                "Patched LD_LIBRARY_PATH to include %s", ros_lib
-            )
-        self._logger.info(
-            "LD_LIBRARY_PATH=%s", os.environ.get("LD_LIBRARY_PATH", "")
-        )
+            self._logger.info("Patched LD_LIBRARY_PATH to include %s", ros_lib)
+        self._logger.info("LD_LIBRARY_PATH=%s", os.environ.get("LD_LIBRARY_PATH", ""))
 
         # Patch sys.path so ROS Python packages (geometry_msgs, rospy, etc.)
         # are importable even when Ray resets PYTHONPATH.
         ros_python_paths = [
             "/opt/ros/noetic/lib/python3/dist-packages",
         ]
-        
+
         for p in ros_python_paths:
             if os.path.isdir(p) and p not in sys.path:
                 sys.path.insert(0, p)
@@ -282,9 +277,7 @@ class FrankaController(Worker):
         self.log_debug("Stop Impedance controller")
 
     def clear_errors(self):
-        self._ros.put_channel(
-            self._arm_reset_channel, self._ErrorRecoveryActionGoal()
-        )
+        self._ros.put_channel(self._arm_reset_channel, self._ErrorRecoveryActionGoal())
 
     def reset_joint(self, reset_pos: list[float]):
         """Reset the joint positions of the robot arm.

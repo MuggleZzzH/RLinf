@@ -180,9 +180,10 @@ class FrankaEnv(gym.Env):
         # Place the controller on controller_node_rank if the arm lives on a
         # different machine (e.g. cameras on GPU server, arm on NUC).
         # Falls back to the env worker's own node when not specified.
-        controller_node_rank = getattr(
-            self.hardware_info.config, "controller_node_rank", None
-        ) or self.node_rank
+        controller_node_rank = (
+            getattr(self.hardware_info.config, "controller_node_rank", None)
+            or self.node_rank
+        )
         self._controller = FrankaController.launch_controller(
             robot_ip=self.config.robot_ip,
             env_idx=self.env_idx,

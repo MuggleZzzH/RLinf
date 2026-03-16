@@ -125,13 +125,23 @@ class LeRobotDatasetWriter:
         self._tasks: dict[str, int] = {}  # task_str -> task_index
         self._global_frame_index = 0  # Global frame counter
 
-        _img_acc_incremental = lambda: {
-            "sum": None, "sum_sq": None, "count": 0, "min": None, "max": None,
-        }
-        _scalar_acc_incremental = lambda: {
-            "sum": 0.0, "sum_sq": 0.0, "count": 0,
-            "min": float("inf"), "max": float("-inf"),
-        }
+        def _img_acc_incremental() -> dict[str, Any]:
+            return {
+                "sum": None,
+                "sum_sq": None,
+                "count": 0,
+                "min": None,
+                "max": None,
+            }
+
+        def _scalar_acc_incremental() -> dict[str, Any]:
+            return {
+                "sum": 0.0,
+                "sum_sq": 0.0,
+                "count": 0,
+                "min": float("inf"),
+                "max": float("-inf"),
+            }
 
         if use_incremental_stats:
             self._stats_accumulators: dict[str, dict[str, Any]] = {
@@ -310,9 +320,7 @@ class LeRobotDatasetWriter:
             # Extra camera image structs
             for key in self.extra_image_keys:
                 if key in extra_images:
-                    data[key].append(
-                        self._create_image_struct(extra_images[key][t], t)
-                    )
+                    data[key].append(self._create_image_struct(extra_images[key][t], t))
                 else:
                     data[key].append({"bytes": b"", "path": ""})
 
@@ -373,17 +381,19 @@ class LeRobotDatasetWriter:
         ]
         for key in self.extra_image_keys:
             fields.append((key, image_struct))
-        fields.extend([
-            ("state", pa.list_(pa.float32(), self.state_dim)),
-            ("actions", pa.list_(pa.float32(), self.action_dim)),
-            ("timestamp", pa.float32()),
-            ("frame_index", pa.int64()),
-            ("episode_index", pa.int64()),
-            ("index", pa.int64()),
-            ("task_index", pa.int64()),
-            ("done", pa.bool_()),
-            ("is_success", pa.bool_()),
-        ])
+        fields.extend(
+            [
+                ("state", pa.list_(pa.float32(), self.state_dim)),
+                ("actions", pa.list_(pa.float32(), self.action_dim)),
+                ("timestamp", pa.float32()),
+                ("frame_index", pa.int64()),
+                ("episode_index", pa.int64()),
+                ("index", pa.int64()),
+                ("task_index", pa.int64()),
+                ("done", pa.bool_()),
+                ("is_success", pa.bool_()),
+            ]
+        )
         schema = pa.schema(fields)
 
         hf_features: dict[str, Any] = {
@@ -392,25 +402,27 @@ class LeRobotDatasetWriter:
         }
         for key in self.extra_image_keys:
             hf_features[key] = {"_type": "Image"}
-        hf_features.update({
-            "state": {
-                "feature": {"dtype": "float32", "_type": "Value"},
-                "length": self.state_dim,
-                "_type": "Sequence",
-            },
-            "actions": {
-                "feature": {"dtype": "float32", "_type": "Value"},
-                "length": self.action_dim,
-                "_type": "Sequence",
-            },
-            "timestamp": {"dtype": "float32", "_type": "Value"},
-            "frame_index": {"dtype": "int64", "_type": "Value"},
-            "episode_index": {"dtype": "int64", "_type": "Value"},
-            "index": {"dtype": "int64", "_type": "Value"},
-            "task_index": {"dtype": "int64", "_type": "Value"},
-            "done": {"dtype": "bool", "_type": "Value"},
-            "is_success": {"dtype": "bool", "_type": "Value"},
-        })
+        hf_features.update(
+            {
+                "state": {
+                    "feature": {"dtype": "float32", "_type": "Value"},
+                    "length": self.state_dim,
+                    "_type": "Sequence",
+                },
+                "actions": {
+                    "feature": {"dtype": "float32", "_type": "Value"},
+                    "length": self.action_dim,
+                    "_type": "Sequence",
+                },
+                "timestamp": {"dtype": "float32", "_type": "Value"},
+                "frame_index": {"dtype": "int64", "_type": "Value"},
+                "episode_index": {"dtype": "int64", "_type": "Value"},
+                "index": {"dtype": "int64", "_type": "Value"},
+                "task_index": {"dtype": "int64", "_type": "Value"},
+                "done": {"dtype": "bool", "_type": "Value"},
+                "is_success": {"dtype": "bool", "_type": "Value"},
+            }
+        )
         schema = schema.with_metadata(
             {"huggingface": json.dumps({"info": {"features": hf_features}})}
         )
@@ -428,17 +440,19 @@ class LeRobotDatasetWriter:
         }
         for key in self.extra_image_keys:
             arrays[key] = pa.array(data[key], type=schema.field(key).type)
-        arrays.update({
-            "state": pa.array(data["state"], type=schema.field("state").type),
-            "actions": pa.array(data["actions"], type=schema.field("actions").type),
-            "timestamp": pa.array(data["timestamp"], type=pa.float32()),
-            "frame_index": pa.array(data["frame_index"], type=pa.int64()),
-            "episode_index": pa.array(data["episode_index"], type=pa.int64()),
-            "index": pa.array(data["index"], type=pa.int64()),
-            "task_index": pa.array(data["task_index"], type=pa.int64()),
-            "done": pa.array(data["done"], type=pa.bool_()),
-            "is_success": pa.array(data["is_success"], type=pa.bool_()),
-        })
+        arrays.update(
+            {
+                "state": pa.array(data["state"], type=schema.field("state").type),
+                "actions": pa.array(data["actions"], type=schema.field("actions").type),
+                "timestamp": pa.array(data["timestamp"], type=pa.float32()),
+                "frame_index": pa.array(data["frame_index"], type=pa.int64()),
+                "episode_index": pa.array(data["episode_index"], type=pa.int64()),
+                "index": pa.array(data["index"], type=pa.int64()),
+                "task_index": pa.array(data["task_index"], type=pa.int64()),
+                "done": pa.array(data["done"], type=pa.bool_()),
+                "is_success": pa.array(data["is_success"], type=pa.bool_()),
+            }
+        )
         return pa.table(arrays, schema=schema)
 
     def _update_stats_accumulators(
@@ -618,7 +632,9 @@ class LeRobotDatasetWriter:
         stats = {}
 
         image_keys = {"image", "wrist_image"} | set(self.extra_image_keys)
-        for key in ["image", "wrist_image"] + self.extra_image_keys + ["state", "actions"]:
+        for key in (
+            ["image", "wrist_image"] + self.extra_image_keys + ["state", "actions"]
+        ):
             acc = self._stats_accumulators.get(key)
             if acc is None or acc["count"] == 0:
                 continue
@@ -723,25 +739,27 @@ class LeRobotDatasetWriter:
                 "shape": list(self.image_shape),
                 "names": ["height", "width", "channel"],
             }
-        features.update({
-            "state": {
-                "dtype": "float32",
-                "shape": [self.state_dim],
-                "names": ["state"],
-            },
-            "actions": {
-                "dtype": "float32",
-                "shape": [self.action_dim],
-                "names": ["actions"],
-            },
-            "timestamp": {"dtype": "float32", "shape": [1], "names": None},
-            "frame_index": {"dtype": "int64", "shape": [1], "names": None},
-            "episode_index": {"dtype": "int64", "shape": [1], "names": None},
-            "index": {"dtype": "int64", "shape": [1], "names": None},
-            "task_index": {"dtype": "int64", "shape": [1], "names": None},
-            "done": {"dtype": "bool", "shape": [1], "names": None},
-            "is_success": {"dtype": "bool", "shape": [1], "names": None},
-        })
+        features.update(
+            {
+                "state": {
+                    "dtype": "float32",
+                    "shape": [self.state_dim],
+                    "names": ["state"],
+                },
+                "actions": {
+                    "dtype": "float32",
+                    "shape": [self.action_dim],
+                    "names": ["actions"],
+                },
+                "timestamp": {"dtype": "float32", "shape": [1], "names": None},
+                "frame_index": {"dtype": "int64", "shape": [1], "names": None},
+                "episode_index": {"dtype": "int64", "shape": [1], "names": None},
+                "index": {"dtype": "int64", "shape": [1], "names": None},
+                "task_index": {"dtype": "int64", "shape": [1], "names": None},
+                "done": {"dtype": "bool", "shape": [1], "names": None},
+                "is_success": {"dtype": "bool", "shape": [1], "names": None},
+            }
+        )
 
         info = {
             "codebase_version": self.codebase_version,

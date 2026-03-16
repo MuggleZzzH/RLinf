@@ -83,10 +83,7 @@ class RealWorldCollectEpisode(CollectEpisode):
                 self._buffers[env_idx]["observations"].append(
                     self._slice_copy(obs, env_idx)
                 )
-            print(
-                "\n>>> Recording STARTED "
-                "(press 'c' = success, 'b' = fail) <<<"
-            )
+            print("\n>>> Recording STARTED (press 'c' = success, 'b' = fail) <<<")
             return obs, reward, terminated, truncated, info
 
         if key == "b":
@@ -102,9 +99,7 @@ class RealWorldCollectEpisode(CollectEpisode):
             recorded_action = action
             if isinstance(info, dict) and "intervene_action" in info:
                 recorded_action = info["intervene_action"]
-            self._record_step(
-                recorded_action, obs, reward, terminated, truncated, info
-            )
+            self._record_step(recorded_action, obs, reward, terminated, truncated, info)
             self._maybe_flush(terminated, truncated)
 
         done = any(
@@ -153,9 +148,7 @@ class DataCollector(Worker):
         obs, _ = self.env.reset()
         success_cnt = 0
         total_cnt = 0
-        progress_bar = tqdm(
-            total=self.num_data_episodes, desc="Successful episodes"
-        )
+        progress_bar = tqdm(total=self.num_data_episodes, desc="Successful episodes")
 
         action_dim = self.env.action_space.shape[-1]
         self.log_info(
@@ -190,8 +183,7 @@ class DataCollector(Worker):
                     )
                 else:
                     self.log_info(
-                        "Episode ended without recording (no 'a' press). "
-                        "Resetting..."
+                        "Episode ended without recording (no 'a' press). Resetting..."
                     )
 
                 obs, _ = self.env.reset()
@@ -204,7 +196,9 @@ class DataCollector(Worker):
 
 
 @hydra.main(
-    version_base="1.1", config_path="config", config_name="realworld_collect_data_wrapper"
+    version_base="1.1",
+    config_path="config",
+    config_name="realworld_collect_data_wrapper",
 )
 def main(cfg):
     cluster = Cluster(cluster_cfg=cfg.cluster)

@@ -438,9 +438,7 @@ class CollectEpisode(gym.Wrapper):
             extra_images_raw = ep_data.get("extra_images")
             extra_images: dict[str, np.ndarray] | None = None
             if extra_images_raw:
-                extra_images = {
-                    k: np.stack(v) for k, v in extra_images_raw.items()
-                }
+                extra_images = {k: np.stack(v) for k, v in extra_images_raw.items()}
             writer.add_episode(
                 images=np.stack(ep_data["images"]),
                 wrist_images=np.stack(wrist_images)

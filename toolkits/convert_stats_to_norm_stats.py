@@ -1,3 +1,17 @@
+# Copyright 2025 The RLinf Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Convert a LeRobot dataset stats.json to OpenPI norm_stats.json.
 
 Reads the per-column statistics produced by the data collection pipeline
@@ -33,9 +47,18 @@ def _pad(arr: list[float], target_len: int, pad_value: float = 0.0) -> list[floa
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert LeRobot stats.json → OpenPI norm_stats.json")
-    parser.add_argument("--stats-json", type=str, required=True, help="Path to the dataset stats.json")
-    parser.add_argument("--output-dir", type=str, required=True, help="Directory to write norm_stats.json into")
+    parser = argparse.ArgumentParser(
+        description="Convert LeRobot stats.json → OpenPI norm_stats.json"
+    )
+    parser.add_argument(
+        "--stats-json", type=str, required=True, help="Path to the dataset stats.json"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        required=True,
+        help="Directory to write norm_stats.json into",
+    )
     parser.add_argument(
         "--select-state-dims",
         type=int,
@@ -43,7 +66,12 @@ def main():
         default=[4, 5, 6, 7, 8, 9, 0],
         help="Indices to select from the raw state vector (default: pi0_realworld_pnp mapping)",
     )
-    parser.add_argument("--action-dim", type=int, default=32, help="Pi0 max action/state dim for zero-padding")
+    parser.add_argument(
+        "--action-dim",
+        type=int,
+        default=32,
+        help="Pi0 max action/state dim for zero-padding",
+    )
     args = parser.parse_args()
 
     with open(args.stats_json) as f:
@@ -84,7 +112,9 @@ def main():
         json.dump(norm_stats, f, indent=2)
 
     print(f"Written norm_stats.json to: {out_path}")
-    print(f"  state:   {len(indices)}D selected from {len(raw_state['mean'])}D → padded to {dim}D")
+    print(
+        f"  state:   {len(indices)}D selected from {len(raw_state['mean'])}D → padded to {dim}D"
+    )
     print(f"  actions: {len(raw_actions['mean'])}D → padded to {dim}D")
 
 

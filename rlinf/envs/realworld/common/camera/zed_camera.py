@@ -79,9 +79,7 @@ class ZEDCamera(BaseCamera):
 
         init_params = sl.InitParameters()
         init_params.set_from_serial_number(int(camera_info.serial_number))
-        init_params.camera_resolution = _find_closest_resolution(
-            camera_info.resolution
-        )
+        init_params.camera_resolution = _find_closest_resolution(camera_info.resolution)
         init_params.camera_fps = camera_info.fps
 
         if camera_info.enable_depth:

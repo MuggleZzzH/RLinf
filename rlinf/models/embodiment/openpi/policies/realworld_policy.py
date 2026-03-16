@@ -98,7 +98,9 @@ class RealworldInputs(transforms.DataTransformFn):
     def __call__(self, data: dict) -> dict:
         # --- State dimension selection ---
         state = np.asarray(data["observation/state"])
-        if self.state_indices is not None and state.shape[-1] != len(self.state_indices):
+        if self.state_indices is not None and state.shape[-1] != len(
+            self.state_indices
+        ):
             state = state[..., list(self.state_indices)]
         if isinstance(state, np.ndarray):
             state = torch.from_numpy(state).float()
@@ -131,9 +133,7 @@ class RealworldInputs(transforms.DataTransformFn):
         resolved = tuple(
             img if img is not None else np.zeros_like(ref) for img in slot_images
         )
-        masks = tuple(
-            np.True_ if img is not None else np.False_ for img in slot_images
-        )
+        masks = tuple(np.True_ if img is not None else np.False_ for img in slot_images)
 
         if self.model_type in (_model.ModelType.PI0, _model.ModelType.PI05):
             names = ("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb")

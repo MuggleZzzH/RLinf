@@ -40,6 +40,5 @@ def create_camera(camera_info: CameraInfo) -> BaseCamera:
     if camera_type in ("realsense", "rs"):
         return RealSenseCamera(camera_info)
     raise ValueError(
-        f"Unsupported camera_type={camera_type!r}. "
-        f"Supported types: 'realsense', 'zed'."
+        f"Unsupported camera_type={camera_type!r}. Supported types: 'realsense', 'zed'."
     )

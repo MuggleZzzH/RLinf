@@ -54,12 +54,8 @@ class FrankaGripper(BaseGripper):
         self._grasp_channel = "/franka_gripper/grasp/goal"
         self._state_channel = "/franka_gripper/joint_states"
 
-        self._ros.create_ros_channel(
-            self._move_channel, MoveActionGoal, queue_size=1
-        )
-        self._ros.create_ros_channel(
-            self._grasp_channel, GraspActionGoal, queue_size=1
-        )
+        self._ros.create_ros_channel(self._move_channel, MoveActionGoal, queue_size=1)
+        self._ros.create_ros_channel(self._grasp_channel, GraspActionGoal, queue_size=1)
         self._ros.connect_ros_channel(
             self._state_channel, JointState, self._on_state_msg
         )

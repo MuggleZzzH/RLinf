@@ -326,9 +326,7 @@ class Cluster:
                 )
             for actor_state in alive_actors:
                 try:
-                    actor = ray.get_actor(
-                        actor_state.name, namespace=Cluster.NAMESPACE
-                    )
+                    actor = ray.get_actor(actor_state.name, namespace=Cluster.NAMESPACE)
                     ray.kill(actor, no_restart=True)
                 except ValueError:
                     # Actor may have already died; skip

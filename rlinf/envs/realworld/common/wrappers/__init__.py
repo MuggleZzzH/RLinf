@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from .euler_obs import Quat2EulerWrapper
+from .gello_intervention import GelloIntervention
 from .gripper_close import GripperCloseEnv
 from .relative_frame import RelativeFrame
 from .reward_done_wrapper import (
@@ -20,7 +21,6 @@ from .reward_done_wrapper import (
     KeyboardRewardDoneWrapper,
 )
 from .spacemouse_intervention import SpacemouseIntervention
-from .gello_intervention import GelloIntervention
 
 __all__ = [
     "Quat2EulerWrapper",
