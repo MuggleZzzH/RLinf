@@ -579,6 +579,89 @@ class FrankaEnv(gym.Env):
         else:
             print(f"Executing dummy action towards {position=}.")
 
+    def trace_safety_box(self, speed: float = 0.5):
+        """Move the robot along the edges of the XYZ safety box so the operator
+        can visually verify the workspace boundaries.
+
+        The robot traces the top face (z_max) first, then the bottom face
+        (z_min), and finally returns to the reset position.  Orientation is
+        kept at ``target_ee_pose`` throughout.
+
+        Args:
+            speed: seconds to spend on each edge segment (lower = faster).
+        """
+        if self.config.is_dummy:
+            self._logger.info("[trace_safety_box] Skipped (dummy mode)")
+            return
+
+        box_min = self.config.ee_pose_limit_min  # [x,y,z,rx,ry,rz]
+        box_max = self.config.ee_pose_limit_max
+
+        # Fixed orientation from target_ee_pose (euler → quat)
+        target_quat = R.from_euler(
+            "xyz", self.config.target_ee_pose[3:].copy()
+        ).as_quat()
+
+        def _make_pose(x, y, z):
+            return np.concatenate([[x, y, z], target_quat])
+
+        xlo, ylo, zlo = box_min[:3]
+        xhi, yhi, zhi = box_max[:3]
+        xmid = (xlo + xhi) / 2
+        ymid = (ylo + yhi) / 2
+        zmid = (zlo + zhi) / 2
+
+        self._logger.info(
+            f"[trace_safety_box] Starting safety-box trace\n"
+            f"  XYZ min = [{xlo:.3f}, {ylo:.3f}, {zlo:.3f}]\n"
+            f"  XYZ max = [{xhi:.3f}, {yhi:.3f}, {zhi:.3f}]\n"
+            f"  Speed = {speed}s per segment"
+        )
+
+        # ── 1. Go to safe height first (center, z_max) ──
+        self._logger.info("[trace_safety_box] → center top (safe height)")
+        self._interpolate_move(_make_pose(xmid, ymid, zhi), timeout=2.0)
+        time.sleep(0.5)
+
+        # ── 2. Trace top face (z = z_max) ──
+        top_corners = [
+            ("x_min y_min z_max", xlo, ylo, zhi),
+            ("x_max y_min z_max", xhi, ylo, zhi),
+            ("x_max y_max z_max", xhi, yhi, zhi),
+            ("x_min y_max z_max", xlo, yhi, zhi),
+            ("x_min y_min z_max", xlo, ylo, zhi),  # close the loop
+        ]
+        self._logger.info("[trace_safety_box] ── Tracing TOP face (z_max) ──")
+        for label, x, y, z in top_corners:
+            self._logger.info(f"  → {label}: ({x:.3f}, {y:.3f}, {z:.3f})")
+            self._interpolate_move(_make_pose(x, y, z), timeout=speed)
+            time.sleep(0.3)
+
+        # ── 3. Go down to z_min ──
+        self._logger.info("[trace_safety_box] ── Going DOWN to z_min ──")
+        self._interpolate_move(_make_pose(xlo, ylo, zlo), timeout=speed)
+        time.sleep(0.3)
+
+        # ── 4. Trace bottom face (z = z_min) ──
+        bottom_corners = [
+            ("x_max y_min z_min", xhi, ylo, zlo),
+            ("x_max y_max z_min", xhi, yhi, zlo),
+            ("x_min y_max z_min", xlo, yhi, zlo),
+            ("x_min y_min z_min", xlo, ylo, zlo),  # close the loop
+        ]
+        self._logger.info("[trace_safety_box] ── Tracing BOTTOM face (z_min) ──")
+        for label, x, y, z in bottom_corners:
+            self._logger.info(f"  → {label}: ({x:.3f}, {y:.3f}, {z:.3f})")
+            self._interpolate_move(_make_pose(x, y, z), timeout=speed)
+            time.sleep(0.3)
+
+        # ── 5. Return to reset position ──
+        self._logger.info("[trace_safety_box] ── Returning to reset position ──")
+        self._interpolate_move(self._reset_pose, timeout=2.0)
+        time.sleep(0.5)
+
+        self._logger.info("[trace_safety_box] Done!")
+
     def _get_observation(self) -> dict:
         if not self.config.is_dummy:
             frames = self._get_camera_frames()

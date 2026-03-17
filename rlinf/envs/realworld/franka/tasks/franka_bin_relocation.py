@@ -47,6 +47,10 @@ class BinEnvConfig(FrankaRobotConfig):
     # don't have a physical divider.
     enable_inner_safety_box: bool = True
 
+    # When True, the robot traces the safety box boundary on the first reset
+    # so the operator can visually verify the workspace limits.
+    trace_safety_box_on_reset: bool = False
+
     def __post_init__(self):
         # --- Compliance controller clip values ---
         # These must match the data-collection environment (DataCollectConfig)
@@ -138,6 +142,7 @@ class FrankaBinRelocationEnv(FrankaEnv):
         config = BinEnvConfig(**override_cfg)
         super().__init__(config, worker_info, hardware_info, env_idx)
         self.task_id = 0  # 0 for forward task, 1 for backward task
+        self._safety_box_traced = False  # flag for one-shot trace
         """
         the inner safety box is used to prevent the gripper from hitting the two walls of the bins in the center.
         it is particularly useful when there is things you want to avoid running into within the bounding box.
@@ -251,7 +256,18 @@ class FrankaBinRelocationEnv(FrankaEnv):
         else:
             raise ValueError(f"Task id {self.task_id} should be 0 or 1")
 
-        return super().reset(joint_reset)
+        obs, info = super().reset(joint_reset)
+
+        # One-shot safety-box trace on the very first reset
+        if self.config.trace_safety_box_on_reset and not self._safety_box_traced:
+            self._safety_box_traced = True
+            self.trace_safety_box(speed=1.5)
+            # Re-go-to-rest after trace
+            self.go_to_rest(joint_reset=False)
+            self._franka_state = self._controller.get_state().wait()[0]
+            obs = self._get_observation()
+
+        return obs, info
 
     def go_to_rest(self, joint_reset=False):
         """

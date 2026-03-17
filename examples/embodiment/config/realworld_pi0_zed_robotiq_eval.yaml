@@ -154,15 +154,17 @@ env:
       # Match the teleoperation/data-collection action semantics used to create
       # the Pi0 dataset. The policy outputs delta actions in that same scale.
       action_scale: [1.0, 1.0, 1.0]
-      # Safety box derived from training data TCP position / orientation range
-      # + ~5 cm margin.  Format: [x, y, z, rx, ry, rz] (Euler xyz).
+      # Safety box: training-data range + 2cm / 0.05rad conservative margin.
       # Training data absolute ranges:
       #   x ∈ [0.445, 0.599]  y ∈ [−0.170, 0.158]  z ∈ [0.155, 0.328]
       #   |rx| ∈ [2.85, π]    ry ∈ [−0.17, 0.39]    rz ∈ [−0.45, 0.62]
-      ee_pose_limit_min: [0.39, -0.22, 0.10, 2.75, -0.28, -0.55]
-      ee_pose_limit_max: [0.65, 0.21, 0.38, 3.15, 0.50, 0.73]
-      # Disable inner safety box (bin divider collision avoidance) for PnP task
+      # Adjust these values gradually after running trace_safety_box.
+      ee_pose_limit_min: [0.42, -0.19, 0.14, 2.80, -0.22, -0.50]
+      ee_pose_limit_max: [0.62,  0.18, 0.35, 3.19,  0.44,  0.67]
       enable_inner_safety_box: false
+      # Set to true to trace the safety box boundary on the first reset
+      # so you can visually verify the limits. Set back to false for normal eval.
+      trace_safety_box_on_reset: true
 
     task_description: null
 
@@ -185,9 +187,10 @@ env:
       max_num_steps: 300
       enable_gripper_penalty: False
       action_scale: [1.0, 1.0, 1.0]
-      ee_pose_limit_min: [0.39, -0.22, 0.10, 2.75, -0.28, -0.55]
-      ee_pose_limit_max: [0.65, 0.21, 0.38, 3.15, 0.50, 0.73]
+      ee_pose_limit_min: [0.42, -0.19, 0.14, 2.80, -0.22, -0.50]
+      ee_pose_limit_max: [0.62,  0.18, 0.35, 3.19,  0.44,  0.67]
       enable_inner_safety_box: false
+      trace_safety_box_on_reset: true
 
     task_description: null
 
