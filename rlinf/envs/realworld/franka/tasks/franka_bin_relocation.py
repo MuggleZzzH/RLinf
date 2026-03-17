@@ -42,25 +42,36 @@ class BinEnvConfig(FrankaRobotConfig):
     ee_pose_limit_min: list | None = None
     ee_pose_limit_max: list | None = None
 
+    # When True, enable the inner safety box that prevents the gripper from
+    # entering a zone around the bin divider.  Set False for PnP tasks that
+    # don't have a physical divider.
+    enable_inner_safety_box: bool = True
+
     def __post_init__(self):
+        # --- Compliance controller clip values ---
+        # These must match the data-collection environment (DataCollectConfig)
+        # so that the robot can reproduce the training trajectories at the
+        # same speed.  Previous values (0.004 / 0.02) were 5× / 2× slower
+        # than the teleoperation environment, causing the model's actions to
+        # be under-expressed.
         self.compliance_param = {
             "translational_stiffness": 2000,
             "translational_damping": 89,
             "rotational_stiffness": 150,
             "rotational_damping": 7,
             "translational_Ki": 0,
-            "translational_clip_x": 0.004,
-            "translational_clip_y": 0.004,
-            "translational_clip_z": 0.004,
-            "translational_clip_neg_x": 0.004,
-            "translational_clip_neg_y": 0.004,
-            "translational_clip_neg_z": 0.004,
+            "translational_clip_x": 0.02,
+            "translational_clip_y": 0.02,
+            "translational_clip_z": 0.02,
+            "translational_clip_neg_x": 0.02,
+            "translational_clip_neg_y": 0.02,
+            "translational_clip_neg_z": 0.02,
             "rotational_clip_x": 0.04,
             "rotational_clip_y": 0.04,
-            "rotational_clip_z": 0.02,
+            "rotational_clip_z": 0.04,
             "rotational_clip_neg_x": 0.04,
             "rotational_clip_neg_y": 0.04,
-            "rotational_clip_neg_z": 0.02,
+            "rotational_clip_neg_z": 0.04,
             "rotational_Ki": 0,
         }
         self.precision_param = {
@@ -132,12 +143,18 @@ class FrankaBinRelocationEnv(FrankaEnv):
         it is particularly useful when there is things you want to avoid running into within the bounding box.
         it uses the intersect_line_bbox function to detect whether the gripper is going to hit the wall
         and clips actions that will lead to collision.
+
+        Can be disabled via ``enable_inner_safety_box: False`` in config /
+        override_cfg for tasks that don't have a physical bin divider.
         """
-        self.inner_safety_box = gym.spaces.Box(
-            self.config.target_ee_pose[:3] - np.array([0.07, 0.03, 0.001]),
-            self.config.target_ee_pose[:3] + np.array([0.07, 0.03, 0.04]),
-            dtype=np.float64,
-        )
+        if self.config.enable_inner_safety_box:
+            self.inner_safety_box = gym.spaces.Box(
+                self.config.target_ee_pose[:3] - np.array([0.07, 0.03, 0.001]),
+                self.config.target_ee_pose[:3] + np.array([0.07, 0.03, 0.04]),
+                dtype=np.float64,
+            )
+        else:
+            self.inner_safety_box = None
 
     @property
     def task_description(self):
@@ -177,8 +194,8 @@ class FrankaBinRelocationEnv(FrankaEnv):
 
     def _clip_position_to_safety_box(self, pose):
         pose = super()._clip_position_to_safety_box(pose)
-        # Clip xyz to inner box
-        if self.inner_safety_box.contains(pose[:3]):
+        # Clip xyz to inner box (only when enabled)
+        if self.inner_safety_box is not None and self.inner_safety_box.contains(pose[:3]):
             pose[:3] = self.intersect_line_bbox(
                 self._franka_state.tcp_pose[:3],
                 pose[:3],

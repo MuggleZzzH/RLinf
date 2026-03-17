@@ -161,6 +161,8 @@ env:
       #   |rx| ∈ [2.85, π]    ry ∈ [−0.17, 0.39]    rz ∈ [−0.45, 0.62]
       ee_pose_limit_min: [0.39, -0.22, 0.10, 2.75, -0.28, -0.55]
       ee_pose_limit_max: [0.65, 0.21, 0.38, 3.15, 0.50, 0.73]
+      # Disable inner safety box (bin divider collision avoidance) for PnP task
+      enable_inner_safety_box: false
 
     task_description: null
 
@@ -185,6 +187,7 @@ env:
       action_scale: [1.0, 1.0, 1.0]
       ee_pose_limit_min: [0.39, -0.22, 0.10, 2.75, -0.28, -0.55]
       ee_pose_limit_max: [0.65, 0.21, 0.38, 3.15, 0.50, 0.73]
+      enable_inner_safety_box: false
 
     task_description: null
 
