@@ -142,14 +142,14 @@ env:
     keyboard_reward_wrapper: single_stage
     use_spacemouse: False
 
-    max_steps_per_rollout_epoch: 1000
-    max_episode_steps: 1000
+    max_steps_per_rollout_epoch: 300
+    max_episode_steps: 300
 
     override_cfg:
       target_ee_pose: [0.53, -0.07, 0.2, 3.12, 0.19, 0.24]
       use_dense_reward: False
       is_dummy: false
-      max_num_steps: 1000
+      max_num_steps: 300
       enable_gripper_penalty: False
       # Match the teleoperation/data-collection action semantics used to create
       # the Pi0 dataset. The policy outputs delta actions in that same scale.
@@ -157,7 +157,7 @@ env:
       # Safety box: training-data range + 2cm / 0.05rad conservative margin.
       # z_min raised by 2cm after trace verification.
       # z_min=0.14: verified safe during trace; model needs z≈0.151 for grasping.
-      ee_pose_limit_min: [0.42, -0.19, 0.1, 2.80, -0.22, -0.50]
+      ee_pose_limit_min: [0.42, -0.19, 0.15, 2.80, -0.22, -0.50]
       ee_pose_limit_max: [0.62,  0.18, 0.35, 3.19,  0.44,  0.67]
       enable_inner_safety_box: false
       trace_safety_box_on_reset: false
@@ -173,8 +173,8 @@ env:
     keyboard_reward_wrapper: single_stage
     use_spacemouse: False
 
-    max_steps_per_rollout_epoch: 1000
-    max_episode_steps: 1000
+    max_steps_per_rollout_epoch: 300
+    max_episode_steps: 300
 
     video_cfg:
       save_video: True
@@ -185,14 +185,15 @@ env:
       target_ee_pose: [0.53, -0.07, 0.2, 3.12, 0.19, 0.24]
       use_dense_reward: False
       is_dummy: false
-      max_num_steps: 1000
+      max_num_steps: 300
       enable_gripper_penalty: False
       action_scale: [1.0, 1.0, 1.0]
       # z_min=0.12: lowered from 0.14 to allow model to reach grasping height.
-      ee_pose_limit_min: [0.42, -0.19, 0.12, 2.80, -0.22, -0.50]
+      ee_pose_limit_min: [0.42, -0.19, 0.15, 2.80, -0.22, -0.50]
       ee_pose_limit_max: [0.62,  0.18, 0.35, 3.19,  0.44,  0.67]
       enable_inner_safety_box: false
-      trace_safety_box_on_reset: true
+      trace_safety_box_on_reset: false
+      
 
     task_description: null
 

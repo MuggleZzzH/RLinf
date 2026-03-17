@@ -121,7 +121,11 @@ class RecordVideo(gym.Wrapper):
             image_src = self._get_image_from_dict(obs)
             if image_src is None:
                 return []
-            return self._split_image_source(image_src)
+            batches = self._split_image_source(image_src)
+            extra = obs.get("extra_view_images")
+            if extra is not None:
+                batches = self._merge_extra_views(batches, extra)
+            return batches
 
         if isinstance(obs, (list, tuple)):
             if len(obs) == 0:
@@ -133,6 +137,9 @@ class RecordVideo(gym.Wrapper):
                     if image_src is None:
                         continue
                     batches = self._split_image_source(image_src)
+                    extra = item.get("extra_view_images")
+                    if extra is not None:
+                        batches = self._merge_extra_views(batches, extra)
                     if batches:
                         frames.append(batches[0])
                 return frames
@@ -149,6 +156,37 @@ class RecordVideo(gym.Wrapper):
         if isinstance(obs, np.ndarray):
             return self._split_image_source(obs)
         return []
+
+    def _merge_extra_views(
+        self,
+        main_batches: list[list[np.ndarray]],
+        extra_views: Any,
+    ) -> list[list[np.ndarray]]:
+        """Tile extra camera views alongside the main image for each env.
+
+        Expects *extra_views* to be a 5-D array/tensor with shape
+        ``(num_envs, num_extra_views, H, W, C)``.
+        """
+        extra = self._to_numpy(extra_views)
+        if extra.ndim != 5:
+            return main_batches
+
+        result = []
+        for time_images in main_batches:
+            merged = []
+            for env_id, main_img in enumerate(time_images):
+                if env_id >= extra.shape[0]:
+                    merged.append(main_img)
+                    continue
+                views = [main_img]
+                for v_idx in range(extra.shape[1]):
+                    ev = extra[env_id, v_idx]
+                    if ev.dtype != np.uint8:
+                        ev = ev.astype(np.uint8)
+                    views.append(ev)
+                merged.append(np.concatenate(views, axis=1))
+            result.append(merged)
+        return result
 
     def _split_image_source(self, image_src: Any) -> list[list[np.ndarray]]:
         """Normalize common image tensor layouts into frame batches."""

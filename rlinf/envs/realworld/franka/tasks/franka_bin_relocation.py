@@ -163,7 +163,11 @@ class FrankaBinRelocationEnv(FrankaEnv):
 
     @property
     def task_description(self):
-        return "bin relocation"
+        # Must match the prompt used during SFT data collection (DataCollectEnv).
+        # Using the wrong prompt causes the language-conditioned policy to ignore
+        # visual cues (e.g. always moving in one direction regardless of object
+        # position).
+        return "pick up the duck and put it into the container"
 
     def intersect_line_bbox(self, p1, p2, bbox_min, bbox_max):
         # Define the parameterized line segment
