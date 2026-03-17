@@ -1,6 +1,8 @@
 defaults:
-  - env/realworld_bin_relocation@env.train
-  - env/realworld_bin_relocation@env.eval
+  # Use the same real-world task env as data collection so prompt, camera
+  # crop, reset pose, and go_to_rest behavior match the SFT dataset.
+  - env/realworld_data_collect@env.train
+  - env/realworld_data_collect@env.eval
   - model/pi0@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
@@ -150,19 +152,19 @@ env:
       use_dense_reward: False
       is_dummy: false
       max_num_steps: 300
+      step_frequency: 10.0
+      reward_threshold: [0.01, 0.01, 0.01, 0.2, 0.2, 0.2]
+      binary_gripper_threshold: 0.5
+      success_hold_steps: 1
+      enable_random_reset: false
       enable_gripper_penalty: False
       # Match the teleoperation/data-collection action semantics used to create
       # the Pi0 dataset. The policy outputs delta actions in that same scale.
       action_scale: [1.0, 1.0, 1.0]
-      # Safety box: training-data range + 2cm / 0.05rad conservative margin.
-      # z_min raised by 2cm after trace verification.
-      # z_min=0.14: verified safe during trace; model needs z≈0.151 for grasping.
+      # Pin the workspace limits explicitly so eval does not silently inherit a
+      # different safety box when task env defaults change.
       ee_pose_limit_min: [0.42, -0.19, 0.15, 2.80, -0.22, -0.50]
       ee_pose_limit_max: [0.62,  0.18, 0.35, 3.19,  0.44,  0.67]
-      enable_inner_safety_box: false
-      trace_safety_box_on_reset: false
-
-    task_description: null
 
   # Pure-eval runs use env.eval, so keep the realworld task settings here as
   # well instead of relying on env.train overrides.
@@ -186,16 +188,15 @@ env:
       use_dense_reward: False
       is_dummy: false
       max_num_steps: 300
+      step_frequency: 10.0
+      reward_threshold: [0.01, 0.01, 0.01, 0.2, 0.2, 0.2]
+      binary_gripper_threshold: 0.5
+      success_hold_steps: 1
+      enable_random_reset: false
       enable_gripper_penalty: False
       action_scale: [1.0, 1.0, 1.0]
-      # z_min=0.12: lowered from 0.14 to allow model to reach grasping height.
       ee_pose_limit_min: [0.42, -0.19, 0.15, 2.80, -0.22, -0.50]
       ee_pose_limit_max: [0.62,  0.18, 0.35, 3.19,  0.44,  0.67]
-      enable_inner_safety_box: false
-      trace_safety_box_on_reset: false
-      
-
-    task_description: null
 
 rollout:
   group_name: "RolloutGroup"
