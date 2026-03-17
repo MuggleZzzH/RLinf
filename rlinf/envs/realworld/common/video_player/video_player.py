@@ -35,9 +35,25 @@ class VideoPlayer:
             self.queue.put(frame)
 
     def _play(self):
-        if os.environ.get("DISPLAY") is None:
+        # Check for a usable display (DISPLAY or WAYLAND_DISPLAY must be set and non-empty).
+        display = os.environ.get("DISPLAY", "")
+        wayland = os.environ.get("WAYLAND_DISPLAY", "")
+        if not display and not wayland:
             warnings.warn(
-                "No display found. VideoPlayer will not run. Set DISPLAY environment variable to enable."
+                "No display found (DISPLAY / WAYLAND_DISPLAY unset). "
+                "VideoPlayer will not run. Set DISPLAY to enable."
+            )
+            return
+
+        # Even with DISPLAY set, OpenCV may lack GUI support (headless build).
+        try:
+            # A lightweight probe: create and destroy a tiny named window.
+            cv2.namedWindow("_probe", cv2.WINDOW_AUTOSIZE)
+            cv2.destroyWindow("_probe")
+        except cv2.error:
+            warnings.warn(
+                "OpenCV GUI backend unavailable (headless build?). "
+                "VideoPlayer will not run. Rebuild OpenCV with GTK/Qt support to enable."
             )
             return
 

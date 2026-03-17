@@ -317,7 +317,7 @@ _CONFIGS = [
             repo_id="realworld_pnp",
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_base/assets"),
-            extra_delta_transform=False,
+            extra_delta_transform=True,  # True: training data is already delta, skip DeltaActions/AbsoluteActions
             state_indices=(4, 5, 6, 7, 8, 9, 0),
             extra_image_keys=("extra_image_0", "extra_image_1"),
             pi0_slot_keys=(

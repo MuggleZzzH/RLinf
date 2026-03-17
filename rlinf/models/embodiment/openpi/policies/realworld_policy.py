@@ -89,9 +89,14 @@ class RealworldInputs(transforms.DataTransformFn):
     # Mapping of the three Pi0 image slots to observation keys.
     # The three entries correspond to (base_0_rgb, left_wrist_0_rgb, right_wrist_0_rgb).
     # Use None to pad a slot with zeros and mask it out.
+    # NOTE: must match the pi0_slot_keys in the training dataconfig
+    # (pi0_realworld_pnp in dataconfig/__init__.py):
+    #   slot 0 (base_0_rgb)       → extra_image_0
+    #   slot 1 (left_wrist_0_rgb) → image  (main camera)
+    #   slot 2 (right_wrist_0_rgb)→ extra_image_1
     pi0_slot_keys: tuple[str | None, str | None, str | None] = (
-        "observation/image",
         "observation/extra_image_0",
+        "observation/image",
         "observation/extra_image_1",
     )
 
