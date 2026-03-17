@@ -37,6 +37,10 @@ class BinEnvConfig(FrankaRobotConfig):
         default_factory=lambda: np.array([0.01, 0.01, 0.01, 0.2, 0.2, 0.2])
     )
     action_scale: np.ndarray | None = None
+    # Safety-box overrides: set via override_cfg (e.g. YAML) to skip auto-computation.
+    # When None, limits are auto-computed from target_ee_pose and random_*_range.
+    ee_pose_limit_min: list | None = None
+    ee_pose_limit_max: list | None = None
 
     def __post_init__(self):
         self.compliance_param = {
@@ -88,26 +92,34 @@ class BinEnvConfig(FrankaRobotConfig):
             self.action_scale = np.array([0.03, 0.1, 1])
         else:
             self.action_scale = np.array(self.action_scale)
-        self.ee_pose_limit_min = np.array(
-            [
-                self.target_ee_pose[0] - 0.01,
-                self.target_ee_pose[1] - self.random_y_range,
-                self.target_ee_pose[2] - self.random_z_range_low,
-                self.target_ee_pose[3] - 0.01,
-                self.target_ee_pose[4] - 0.01,
-                self.target_ee_pose[5] - self.random_rz_range,
-            ]
-        )
-        self.ee_pose_limit_max = np.array(
-            [
-                self.target_ee_pose[0] + 0.2,
-                self.target_ee_pose[1] + self.random_y_range,
-                self.target_ee_pose[2] + self.random_z_range_high,
-                self.target_ee_pose[3] + 0.01,
-                self.target_ee_pose[4] + 0.01,
-                self.target_ee_pose[5] + self.random_rz_range,
-            ]
-        )
+
+        # Safety box: use explicit overrides when provided, otherwise auto-compute.
+        if self.ee_pose_limit_min is not None:
+            self.ee_pose_limit_min = np.array(self.ee_pose_limit_min)
+        else:
+            self.ee_pose_limit_min = np.array(
+                [
+                    self.target_ee_pose[0] - self.random_x_range - 0.05,
+                    self.target_ee_pose[1] - self.random_y_range,
+                    self.target_ee_pose[2] - 0.05,
+                    self.target_ee_pose[3] - 0.40,
+                    self.target_ee_pose[4] - 0.30,
+                    self.target_ee_pose[5] - self.random_rz_range,
+                ]
+            )
+        if self.ee_pose_limit_max is not None:
+            self.ee_pose_limit_max = np.array(self.ee_pose_limit_max)
+        else:
+            self.ee_pose_limit_max = np.array(
+                [
+                    self.target_ee_pose[0] + 0.2,
+                    self.target_ee_pose[1] + self.random_y_range + 0.10,
+                    self.target_ee_pose[2] + self.random_z_range_high + 0.10,
+                    self.target_ee_pose[3] + 0.05,
+                    self.target_ee_pose[4] + 0.30,
+                    self.target_ee_pose[5] + self.random_rz_range,
+                ]
+            )
 
 
 class FrankaBinRelocationEnv(FrankaEnv):

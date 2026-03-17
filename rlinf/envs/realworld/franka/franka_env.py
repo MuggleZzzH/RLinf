@@ -212,7 +212,8 @@ class FrankaEnv(gym.Env):
         action = np.clip(action, self.action_space.low, self.action_space.high)
         xyz_delta = action[:3]
 
-        self.next_position = self._franka_state.tcp_pose.copy()
+        current_pos = self._franka_state.tcp_pose.copy()
+        self.next_position = current_pos.copy()
         self.next_position[:3] = (
             self.next_position[:3] + xyz_delta * self.config.action_scale[0]
         )
@@ -226,7 +227,34 @@ class FrankaEnv(gym.Env):
             gripper_action = action[6] * self.config.action_scale[2]
 
             is_gripper_action_effective = self._gripper_action(gripper_action)
-            self._move_action(self._clip_position_to_safety_box(self.next_position))
+
+            # ── Diagnostic logging (every 10 steps to avoid flooding) ──
+            # Capture pre-clip position BEFORE _clip_position_to_safety_box
+            # because the clip function modifies the array in-place.
+            if self._num_steps % 10 == 0:
+                pos_before_clip = self.next_position[:3].copy()
+
+            clipped_position = self._clip_position_to_safety_box(self.next_position)
+
+            if self._num_steps % 10 == 0:
+                pos_after_clip = clipped_position[:3].copy()
+                delta_sent = pos_after_clip - current_pos[:3]
+                intended_delta = pos_before_clip - current_pos[:3]
+                self._logger.info(
+                    f"[STEP-DIAG #{self._num_steps}] "
+                    f"action_xyz={action[:3].tolist()}, "
+                    f"action_rpy={action[3:6].tolist()}, "
+                    f"action_grip={action[6]:.4f} | "
+                    f"cur_pos={current_pos[:3].tolist()} | "
+                    f"desired={pos_before_clip.tolist()} | "
+                    f"clipped={pos_after_clip.tolist()} | "
+                    f"intended_delta={intended_delta.tolist()} | "
+                    f"actual_delta={delta_sent.tolist()} | "
+                    f"delta_norm={np.linalg.norm(delta_sent):.6f}m | "
+                    f"clip_loss={1.0 - np.linalg.norm(delta_sent) / max(np.linalg.norm(intended_delta), 1e-10):.1%}"
+                )
+
+            self._move_action(clipped_position)
         else:
             is_gripper_action_effective = True
 
