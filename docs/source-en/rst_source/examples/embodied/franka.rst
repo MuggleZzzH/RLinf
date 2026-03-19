@@ -84,7 +84,8 @@ Hardware Setup
 The real-world setup requires the following hardware components:
 
 - **Robotic Arm**: Franka Emika Panda
-- **Cameras**: Intel RealSense cameras for capturing RGB images
+- **Cameras**: Intel RealSense cameras (default) or Stereolabs ZED cameras
+- **Gripper**: Franka hand (default) or Robotiq 2F-85/2F-140
 - **Computing Unit**: A computer with GPU support for training the CNN policy
 - **Robot Controller**: A small computer (does not require GPU) connected with the robotic arm in the same local network
 - **Space Mouse (Optional)**: For teleoperation data collection or human intervention during training.
@@ -93,6 +94,12 @@ The real-world setup requires the following hardware components:
 
   Ensure all computers are networked in the same local network.
   The robot arm is only required to be in the same local network as the robot controller.
+
+.. note::
+
+   **Using ZED cameras or Robotiq grippers?**  See the dedicated guide
+   :doc:`franka_zed_robotiq` for SDK installation, serial-device setup,
+   YAML configuration fields, and a dummy test config.
 
 Dependency Installation
 -------------------------
