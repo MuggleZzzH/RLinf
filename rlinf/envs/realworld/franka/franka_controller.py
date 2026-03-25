@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import sys
 import time
 from typing import Optional
@@ -125,10 +126,24 @@ class FrankaController(Worker):
         # Start impedance control
         self.start_impedance()
 
-        # Start reconfigure client
-        self._reconf_client = ReconfClient(
-            "cartesian_impedance_controllerdynamic_reconfigure_compliance_param_node"
-        )
+        # Wait for roslaunch process to spin up and register its ROS services
+        # before connecting the ReconfClient. Without this the client
+        # immediately blocks waiting for a service that does not yet exist.
+        time.sleep(3)
+
+        # Start reconfigure client (optional – the service only exists when
+        # dynamic_reconfigure is included in the launch file; skip if absent)
+        try:
+            self._reconf_client = ReconfClient(
+                "cartesian_impedance_controllerdynamic_reconfigure_compliance_param_node",
+                timeout=5,
+            )
+        except Exception as e:
+            self._reconf_client = None
+            self.log_warning(
+                f"dynamic_reconfigure service not found ({e}), "
+                "compliance reconfiguration is disabled."
+            )
 
     def _init_ros_channels(self):
         """Initialize ROS channels for arm communication.
@@ -188,6 +203,8 @@ class FrankaController(Worker):
     # ── Public API ───────────────────────────────────────────────────
 
     def reconfigure_compliance_params(self, params: dict[str, float]):
+        if self._reconf_client is None:
+            return
         self._reconf_client.update_configuration(params)
         self.log_debug(f"Reconfigure compliance parameters: {params}")
 
@@ -227,6 +244,7 @@ class FrankaController(Worker):
             ],
             stdout=sys.stdout,
             stderr=sys.stdout,
+            env=os.environ.copy(),
         )
 
         self._wait_robot()
@@ -268,6 +286,7 @@ class FrankaController(Worker):
                 f"load_gripper:={load_gripper}",
             ],
             stdout=sys.stdout,
+            env=os.environ.copy(),
         )
         self._wait_robot()
         self._logger.debug("Joint reset begins")
