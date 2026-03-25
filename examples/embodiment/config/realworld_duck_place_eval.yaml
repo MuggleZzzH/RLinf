@@ -30,17 +30,23 @@ cluster:
       hardware:
         type: Franka
         configs:
-          - robot_ip: ROBOT_IP
+          - robot_ip: ROBOT_IP # Replace with your robot's IP address.
             node_rank: 0
+            # Replace with the node rank that launches FrankaController.
             controller_node_rank: CONTROLLER_NODE_RANK
+            # Replace with your camera backend. Supported values: realsense, zed.
             camera_type: CAMERA_TYPE
+            # Replace with your camera serials in the same slot order used at deployment time.
             camera_serials: ["CAMERA_SERIAL1", "CAMERA_SERIAL2", "CAMERA_SERIAL3"]
+            # Replace with your gripper backend. Supported values: franka, robotiq.
             gripper_type: GRIPPER_TYPE
+            # Replace with your Robotiq serial device path. Unused when gripper_type=franka.
             gripper_connection: GRIPPER_CONNECTION
     - label: nuc
       node_ranks: 1
       env_configs:
         - node_ranks: 1
+          # Replace with the Python path on the controller / rollout node.
           python_interpreter_path: /path/to/python
 
 runner:
@@ -97,6 +103,7 @@ rollout:
   collect_prev_infos: False
   sync_weight_nccl_max_ctas: 32
   model:
+    # Replace with your OpenPI checkpoint directory.
     model_path: "/path/to/model/openpi"
     precision: ${actor.model.precision}
 

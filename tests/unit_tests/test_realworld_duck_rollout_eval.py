@@ -213,8 +213,14 @@ def test_realworld_duck_place_eval_config_composes(monkeypatch: pytest.MonkeyPat
         cfg.cluster.node_groups[1].env_configs[0].python_interpreter_path
         == "/path/to/python"
     )
-    assert cfg.env.train.override_cfg.task_description == "TASK_DESCRIPTION"
-    assert cfg.env.eval.override_cfg.task_description == "TASK_DESCRIPTION"
+    assert (
+        cfg.env.train.override_cfg.task_description
+        == "pick up the duck and put it into the container"
+    )
+    assert (
+        cfg.env.eval.override_cfg.task_description
+        == "pick up the duck and put it into the container"
+    )
     np.testing.assert_allclose(
         cfg.env.eval.override_cfg.target_ee_pose,
         np.array([0.53, -0.07, 0.2, 3.12, 0.19, 0.24]),
@@ -233,8 +239,6 @@ def test_realworld_duck_place_eval_config_composes(monkeypatch: pytest.MonkeyPat
         "cluster.node_groups[0].hardware.configs[0].gripper_type=robotiq",
         "cluster.node_groups[0].hardware.configs[0].gripper_connection=/dev/ttyUSB0",
         "cluster.node_groups[1].env_configs[0].python_interpreter_path=/home/franka/cynws/RLinf/.venv/bin/python3",
-        "env.train.override_cfg.task_description=pick up the duck and put it into the container",
-        "env.eval.override_cfg.task_description=pick up the duck and put it into the container",
         "rollout.model.model_path=/tmp/fake-openpi-checkpoint",
     ]
 

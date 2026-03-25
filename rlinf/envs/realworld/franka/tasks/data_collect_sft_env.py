@@ -41,8 +41,11 @@ class DataCollectSFTConfig(FrankaRobotConfig):
     reward_threshold: np.ndarray = field(
         default_factory=lambda: np.array([0.01, 0.01, 0.01, 0.2, 0.2, 0.2])
     )
+    # random_* is only used by FrankaEnv.go_to_rest() when enable_random_reset=True.
     random_xy_range: float = 0.05
     random_rz_range: float = np.pi / 6
+    # clip_* is only used to derive safe fallback reset / workspace limits when a
+    # task profile does not provide explicit reset_ee_pose or ee_pose_limit_*.
     clip_x_range: float = 0.05
     clip_y_range: float = 0.05
     clip_z_range_low: float = 0.0

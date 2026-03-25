@@ -25,17 +25,18 @@ init_params:
 
 override_cfg:
   is_dummy: false
-  task_description: TASK_DESCRIPTION
+  task_description: "pick up the duck and put it into the container"
+  # Goal pose [x, y, z, rx, ry, rz] used by success checking and orientation clipping.
   target_ee_pose: [0.53, -0.07, 0.2, 3.12, 0.19, 0.24]
+  # Reset pose [x, y, z, rx, ry, rz]. Keep it above the target for a safe approach.
   reset_ee_pose: [0.53, -0.07, 0.3, 3.12, 0.19, 0.24]
-  use_dense_reward: false
   max_num_steps: 300
-  step_frequency: 10.0
+  # Position success tolerance [x, y, z, rx, ry, rz]. FrankaEnv currently checks xyz.
   reward_threshold: [0.01, 0.01, 0.01, 0.2, 0.2, 0.2]
-  binary_gripper_threshold: 0.5
-  success_hold_steps: 1
-  enable_random_reset: false
+  # Disable extra gripper penalties for rollout-only evaluation.
   enable_gripper_penalty: false
+  # [xyz delta scale, rpy delta scale, gripper scale]. Keep 1.0 for Pi0 realworld actions.
   action_scale: [1.0, 1.0, 1.0]
+  # Workspace clip box [x, y, z, rx, ry, rz] used by FrankaEnv._clip_position_to_safety_box().
   ee_pose_limit_min: [0.42, -0.19, 0.15, 2.60, -0.33, -0.50]
   ee_pose_limit_max: [0.62, 0.18, 0.35, 3.64, 0.71, 0.67]
