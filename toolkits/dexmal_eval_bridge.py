@@ -11,16 +11,21 @@ This script connects a Dexmal robot gateway to a locally loaded RLinf/OpenPI pol
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import logging
 import pickle
+import sys
 import time
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 DEFAULT_PROMPT = "fold the towel and place it into the output area"
 MODEL_MODE = 1
@@ -112,6 +117,11 @@ class RobotGatewayClient:
             return None
         return payload
 
+    def get_runtime_state(self) -> dict[str, Any]:
+        response = self._session.get(f"{self._base_url}/runtime_state", timeout=self._timeout)
+        response.raise_for_status()
+        return response.json().get("data", {})
+
     def post_action_chunk(
         self,
         *,
@@ -152,37 +162,218 @@ class JsonlLogger:
         self._summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def create_policy(args: argparse.Namespace):
-    from toolkits.serve_dexmal_openpi import _MockPolicy, _create_checkpoint_policy
+class _LocalMockPolicy:
+    def __init__(self, mode: str, action_horizon: int, action_dim: int):
+        self._mode = mode
+        self._action_horizon = action_horizon
+        self._action_dim = action_dim
+        self._metadata = {
+            "policy_type": "mock",
+            "mock_mode": mode,
+            "action_horizon": action_horizon,
+            "action_dim": action_dim,
+        }
 
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self._metadata
+
+    def infer(self, obs: dict[str, Any], *, noise=None) -> dict[str, Any]:
+        del noise
+        state = obs.get("state")
+        if state is None:
+            raise ValueError('Mock policy requires "state" in observation.')
+        state = np.asarray(state, dtype=np.float32)
+        if state.shape[-1] != self._action_dim:
+            raise ValueError(
+                f"Mock policy expected state dim {self._action_dim}, got {state.shape[-1]}"
+            )
+
+        if self._mode == "hold-state":
+            action = state
+        else:
+            action = np.zeros_like(state, dtype=np.float32)
+
+        action_chunk = np.repeat(action[None, :], self._action_horizon, axis=0)
+        return {
+            "actions": action_chunk,
+            "policy_timing": {"infer_ms": 0.0},
+        }
+
+
+class _RLinfCheckpointPolicy:
+    def __init__(self, model, metadata: dict[str, Any]):
+        self._model = model
+        self._metadata = metadata
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self._metadata
+
+    def infer(self, obs: dict[str, Any], *, noise=None) -> dict[str, Any]:
+        del noise
+        import torch
+        from openpi.models import model as _model
+
+        batched_obs = {
+            "state": np.asarray(obs["state"], dtype=np.float32)[None, ...],
+            "images": {
+                name: np.asarray(image, dtype=np.uint8)[None, ...]
+                for name, image in obs["images"].items()
+            },
+            "prompt": [obs["prompt"]],
+        }
+
+        infer_start = time.time()
+        processed_obs = self._model.input_transform(batched_obs, transpose=False)
+        processed_obs = self._model.precision_processor(processed_obs)
+        observation = _model.Observation.from_dict(processed_obs)
+        outputs = self._model.sample_actions(
+            observation,
+            mode="eval",
+            compute_values=False,
+        )
+        actions = self._model.output_transform(
+            {"actions": outputs["actions"], "state": observation.state}
+        )["actions"]
+
+        if torch.is_tensor(actions):
+            actions = actions.detach().cpu().numpy()
+        actions = np.asarray(actions, dtype=np.float32)
+        if actions.ndim != 3 or actions.shape[0] != 1:
+            raise RuntimeError(f"Expected batched action output shape [1, T, {ACTION_DIM}], got {actions.shape}")
+
+        infer_ms = 1000.0 * (time.time() - infer_start)
+        return {
+            "actions": actions[0],
+            "policy_timing": {"infer_ms": infer_ms},
+        }
+
+
+def _resolve_asset_id(repo_id: str | None, asset_id: str | None) -> str | None:
+    if asset_id is not None:
+        return asset_id
+    if repo_id is None:
+        return None
+    return Path(str(repo_id)).name
+
+
+def _create_rlinf_checkpoint_policy(args: argparse.Namespace):
+    import safetensors
+    import torch
+    import openpi.transforms as transforms
+    from openpi.training import checkpoints as _checkpoints
+    from openpi.training.config import AssetsConfig
+
+    from rlinf.models.embodiment.openpi.dataconfig import get_openpi_config
+    from rlinf.models.embodiment.openpi.openpi_action_model import (
+        OpenPi0Config,
+        OpenPi0ForRLActionPrediction,
+    )
+
+    if args.checkpoint_dir is None:
+        raise ValueError("--checkpoint-dir is required unless --mock-policy is used.")
+
+    asset_id = _resolve_asset_id(args.repo_id, args.asset_id)
+    assets_dir = args.assets_dir or args.checkpoint_dir
+    data_kwargs: dict[str, Any] = {
+        "assets": AssetsConfig(assets_dir=assets_dir, asset_id=asset_id),
+    }
+    if args.repo_id is not None:
+        data_kwargs["repo_id"] = args.repo_id
+
+    train_config = get_openpi_config(
+        args.config_name,
+        model_path=args.checkpoint_dir,
+        data_kwargs=data_kwargs,
+    )
+
+    actor_model_config = OpenPi0Config(**train_config.model.__dict__)
+    actor_model_config.__dict__.update(
+        {
+            "config_name": args.config_name,
+            # Keep both RLinf's rollout chunk length and the base OpenPI horizon aligned.
+            "action_chunk": args.action_horizon,
+            "action_horizon": args.action_horizon,
+            "action_env_dim": ACTION_DIM,
+            "num_images_in_input": 3,
+        }
+    )
+
+    model = OpenPi0ForRLActionPrediction(actor_model_config)
+    full_weights_path = Path(args.checkpoint_dir) / "model_state_dict" / "full_weights.pt"
+    actor_full_weights_path = Path(args.checkpoint_dir) / "actor" / "model_state_dict" / "full_weights.pt"
+    safetensor_paths = sorted(glob.glob(str(Path(args.checkpoint_dir) / "*.safetensors")))
+    if not safetensor_paths:
+        default_safetensor = Path(args.checkpoint_dir) / "model.safetensors"
+        if default_safetensor.exists():
+            safetensor_paths = [str(default_safetensor)]
+
+    logging.info("Loading RLinf checkpoint from %s", args.checkpoint_dir)
+    if full_weights_path.exists():
+        state_dict = torch.load(full_weights_path, map_location="cpu")
+        model.load_state_dict(state_dict, strict=False)
+    elif actor_full_weights_path.exists():
+        state_dict = torch.load(actor_full_weights_path, map_location="cpu")
+        model.load_state_dict(state_dict, strict=False)
+    elif safetensor_paths:
+        for weight_path in safetensor_paths:
+            safetensors.torch.load_model(model, weight_path, strict=False)
+    else:
+        raise FileNotFoundError(
+            f"No supported checkpoint weights found under {args.checkpoint_dir}. "
+            "Expected model_state_dict/full_weights.pt, actor/model_state_dict/full_weights.pt, or *.safetensors."
+        )
+
+    model.paligemma_with_expert.to_bfloat16_for_selected_params("bfloat16")
+    model.eval()
+
+    if args.pytorch_device:
+        model = model.to(args.pytorch_device)
+    elif torch.cuda.is_available():
+        model = model.to("cuda")
+
+    data_config = train_config.data.create(train_config.assets_dirs, actor_model_config)
+    if data_config.asset_id is None:
+        raise ValueError("Asset id is required to load norm stats.")
+    norm_stats = _checkpoints.load_norm_stats(Path(assets_dir).expanduser().resolve(), data_config.asset_id)
+
+    model.setup_wrappers(
+        transforms=[
+            transforms.InjectDefaultPrompt(args.prompt),
+            *data_config.data_transforms.inputs,
+            transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
+            *data_config.model_transforms.inputs,
+        ],
+        output_transforms=[
+            *data_config.model_transforms.outputs,
+            transforms.Unnormalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
+            *data_config.data_transforms.outputs,
+        ],
+    )
+
+    metadata = {
+        "config_name": args.config_name,
+        "asset_id": data_config.asset_id,
+        "checkpoint_dir": str(Path(args.checkpoint_dir).expanduser().resolve()),
+        "assets_dir": str(Path(assets_dir).expanduser().resolve()),
+        "repo_id": args.repo_id,
+        "policy_type": "rlinf_openpi",
+        "action_horizon": args.action_horizon,
+        "action_dim": ACTION_DIM,
+    }
+    return _RLinfCheckpointPolicy(model, metadata)
+
+
+def create_policy(args: argparse.Namespace):
     if args.mock_policy is not None:
-        return _MockPolicy(
+        return _LocalMockPolicy(
             mode=args.mock_policy,
             action_horizon=args.action_horizon,
             action_dim=ACTION_DIM,
         )
 
-    if args.checkpoint_dir is None:
-        raise ValueError("--checkpoint-dir is required unless --mock-policy is used.")
-
-    policy_args = SimpleNamespace(
-        config_name=args.config_name,
-        checkpoint_dir=args.checkpoint_dir,
-        assets_dir=args.assets_dir,
-        repo_id=args.repo_id,
-        asset_id=args.asset_id,
-        host="0.0.0.0",
-        port=None,
-        default_prompt=args.prompt,
-        pytorch_device=args.pytorch_device,
-        metadata_json=None,
-        record=False,
-        use_repack_inputs=False,
-        mock_policy=None,
-        mock_action_horizon=args.action_horizon,
-        mock_action_dim=ACTION_DIM,
-    )
-    return _create_checkpoint_policy(policy_args)
+    return _create_rlinf_checkpoint_policy(args)
 
 
 def decode_image(image_bytes: bytes) -> np.ndarray:
@@ -262,6 +453,24 @@ def clip_action_chunk(
     return clipped_actions
 
 
+def wait_for_chunk_completion(
+    gateway: RobotGatewayClient,
+    *,
+    poll_hz: float,
+    timeout_s: float,
+) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        runtime_state = gateway.get_runtime_state()
+        pending_actions = int(runtime_state.get("pending_actions", 0))
+        if pending_actions == 0:
+            return True
+        sleep_time = max(0.0, 1.0 / max(poll_hz, 1e-3))
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+    return False
+
+
 def summarize_run(stats: dict[str, list[float]] | dict[str, int], *, shadow: bool, chunks: int) -> dict[str, Any]:
     infer_times = np.asarray(stats["infer_ms"], dtype=np.float32) if stats["infer_ms"] else np.asarray([], dtype=np.float32)
     post_times = np.asarray(stats["post_ms"], dtype=np.float32) if stats["post_ms"] else np.asarray([], dtype=np.float32)
@@ -323,6 +532,7 @@ def main() -> None:
 
     chunk_idx = 0
     empty_poll_log_at = 0.0
+    posted_real_chunk = False
 
     try:
         while args.max_chunks <= 0 or chunk_idx < args.max_chunks:
@@ -367,6 +577,8 @@ def main() -> None:
             )
 
             clip_max_abs = float(np.max(np.abs(clipped_actions - raw_actions)))
+            first_delta_max_abs = float(np.max(np.abs(clipped_actions[0] - current_state)))
+            last_delta_max_abs = float(np.max(np.abs(clipped_actions[-1] - current_state)))
             stats["clip_max_abs"].append(clip_max_abs)
 
             post_start = time.time()
@@ -376,6 +588,8 @@ def main() -> None:
                 dry_run=args.shadow,
                 action_source="dexmal_eval_bridge",
             )
+            if not args.shadow:
+                posted_real_chunk = True
             post_ms = 1000.0 * (time.time() - post_start)
             stats["post_ms"].append(post_ms)
             stats["post_success"] += 1
@@ -387,6 +601,9 @@ def main() -> None:
                 "infer_ms": infer_ms,
                 "post_ms": post_ms,
                 "clip_max_abs": clip_max_abs,
+                "first_delta_max_abs": first_delta_max_abs,
+                "last_delta_max_abs": last_delta_max_abs,
+                "current_state": np.round(current_state, 6).tolist(),
                 "raw_first_action": np.round(raw_actions[0], 6).tolist(),
                 "clipped_first_action": np.round(clipped_actions[0], 6).tolist(),
                 "raw_last_action": np.round(raw_actions[-1], 6).tolist(),
@@ -397,14 +614,34 @@ def main() -> None:
             jsonl_logger.write_chunk(record)
 
             logging.info(
-                "chunk=%d obs_id=%s infer_ms=%.1f post_ms=%.1f shadow=%s clip_max_abs=%.5f",
+                "chunk=%d obs_id=%s infer_ms=%.1f post_ms=%.1f shadow=%s clip_max_abs=%.5f first_delta_max_abs=%.5f last_delta_max_abs=%.5f",
                 chunk_idx,
                 obs_id,
                 infer_ms,
                 post_ms,
                 args.shadow,
                 clip_max_abs,
+                first_delta_max_abs,
+                last_delta_max_abs,
             )
+            final_chunk = args.max_chunks > 0 and (chunk_idx + 1) >= args.max_chunks
+            if final_chunk and not args.shadow:
+                wait_timeout_s = max(5.0, args.action_horizon * 0.02 + 2.0)
+                logging.info("Waiting for current action chunk to drain from robot queue")
+                completed = wait_for_chunk_completion(
+                    gateway,
+                    poll_hz=args.poll_hz,
+                    timeout_s=wait_timeout_s,
+                )
+                if completed:
+                    runtime_state = gateway.get_runtime_state()
+                    logging.info("Robot queue drained. runtime_state=%s", runtime_state)
+                else:
+                    logging.warning(
+                        "Robot queue did not drain within %.1fs. runtime_state=%s",
+                        wait_timeout_s,
+                        gateway.get_runtime_state(),
+                    )
             chunk_idx += 1
 
             sleep_time = max(0.0, (1.0 / args.poll_hz) - (time.time() - loop_start))
@@ -414,6 +651,20 @@ def main() -> None:
     except KeyboardInterrupt:
         logging.info("Interrupted by user.")
     finally:
+        if posted_real_chunk and args.set_stop_mode_on_exit:
+            wait_timeout_s = max(5.0, args.action_horizon * 0.02 + 2.0)
+            logging.info("Waiting for current action chunk to finish before stop mode")
+            completed = wait_for_chunk_completion(
+                gateway,
+                poll_hz=args.poll_hz,
+                timeout_s=wait_timeout_s,
+            )
+            if not completed:
+                logging.warning(
+                    "Timed out after %.1fs while waiting for action chunk completion; forcing stop mode",
+                    wait_timeout_s,
+                )
+
         if args.set_stop_mode_on_exit:
             try:
                 logging.info("Switching robot gateway to stop mode")
