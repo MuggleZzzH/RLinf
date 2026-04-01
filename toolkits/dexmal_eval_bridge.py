@@ -30,6 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 DEFAULT_PROMPT = "fold the towel"
 MODEL_MODE = 1
 STOP_MODE = 0
+MANUAL_MODE = 2
 START_RECORD_MODE = 10
 ACTION_HORIZON = 50
 ACTION_DIM = 14
@@ -93,6 +94,9 @@ class RobotGatewayClient:
         self._base_url = f"http://{host}:{port}"
         self._timeout = timeout
         self._session = requests.Session()
+        # The robot gateway is typically on a local LAN. Ignore HTTP(S)_PROXY to avoid
+        # accidentally routing robot traffic through a local desktop proxy like 127.0.0.1:7897.
+        self._session.trust_env = False
 
     def get_mode(self) -> int | None:
         response = self._session.get(f"{self._base_url}/mode", timeout=self._timeout)
@@ -145,6 +149,10 @@ class RobotGatewayClient:
         if response.status_code >= 400:
             raise RuntimeError(f"Failed to post action chunk: {response.text}")
         return response.json()
+
+
+def _is_operator_handoff_mode(mode: int | None) -> bool:
+    return mode in (STOP_MODE, MANUAL_MODE)
 
 
 class JsonlLogger:
@@ -583,13 +591,43 @@ def main() -> None:
             last_delta_max_abs = float(np.max(np.abs(clipped_actions[-1] - current_state)))
             stats["clip_max_abs"].append(clip_max_abs)
 
+            current_mode = gateway.get_mode()
+            if current_mode != MODEL_MODE:
+                logging.info(
+                    "Dropping inference result for obs_id=%s because gateway mode switched to %s before action post",
+                    obs_id,
+                    current_mode,
+                )
+                sleep_time = max(0.0, (1.0 / args.poll_hz) - (time.time() - loop_start))
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                continue
+
             post_start = time.time()
-            post_result = gateway.post_action_chunk(
-                obs_id=obs_id,
-                actions=clipped_actions,
-                dry_run=args.shadow,
-                action_source="dexmal_eval_bridge",
-            )
+            try:
+                post_result = gateway.post_action_chunk(
+                    obs_id=obs_id,
+                    actions=clipped_actions,
+                    dry_run=args.shadow,
+                    action_source="dexmal_eval_bridge",
+                )
+            except Exception as exc:
+                try:
+                    current_mode = gateway.get_mode()
+                except Exception:
+                    current_mode = None
+                if _is_operator_handoff_mode(current_mode):
+                    logging.info(
+                        "Ignoring action post failure during operator handoff obs_id=%s current_mode=%s error=%s",
+                        obs_id,
+                        current_mode,
+                        exc,
+                    )
+                    sleep_time = max(0.0, (1.0 / args.poll_hz) - (time.time() - loop_start))
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+                    continue
+                raise
             if not args.shadow:
                 posted_real_chunk = True
             post_ms = 1000.0 * (time.time() - post_start)
