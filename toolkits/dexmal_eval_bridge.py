@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-DEFAULT_PROMPT = "fold the towel and place it into the output area"
+DEFAULT_PROMPT = "fold the towel"
 MODEL_MODE = 1
 STOP_MODE = 0
 START_RECORD_MODE = 10
@@ -51,9 +51,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="Prompt sent to the policy.")
 
     parser.add_argument("--action-horizon", type=int, default=ACTION_HORIZON, help="Action chunk length to execute.")
-    parser.add_argument("--action-scale", type=float, default=0.2, help="Action interpolation factor toward each model target.")
-    parser.add_argument("--max-joint-delta", type=float, default=0.03, help="Per-step joint delta limit in radians.")
-    parser.add_argument("--max-gripper-delta", type=float, default=0.005, help="Per-step gripper delta limit.")
+    parser.add_argument("--action-scale", type=float, default=0.35, help="Action interpolation factor toward each model target.")
+    parser.add_argument("--max-joint-delta", type=float, default=0.04, help="Per-step joint delta limit in radians.")
+    parser.add_argument("--max-gripper-delta", type=float, default=0.006, help="Per-step gripper delta limit.")
 
     parser.add_argument("--set-model-mode-on-start", action="store_true", help="Switch robot to model mode on startup.")
     parser.add_argument("--set-stop-mode-on-exit", action="store_true", help="Switch robot to stop mode on exit.")
@@ -213,29 +213,27 @@ class _RLinfCheckpointPolicy:
     def infer(self, obs: dict[str, Any], *, noise=None) -> dict[str, Any]:
         del noise
         import torch
-        from openpi.models import model as _model
 
-        batched_obs = {
-            "state": np.asarray(obs["state"], dtype=np.float32)[None, ...],
-            "images": {
-                name: np.asarray(image, dtype=np.uint8)[None, ...]
-                for name, image in obs["images"].items()
-            },
-            "prompt": [obs["prompt"]],
+        env_obs = {
+            "states": np.asarray(obs["state"], dtype=np.float32)[None, ...],
+            "main_images": np.asarray(obs["images"]["cam_high"], dtype=np.uint8)[None, ...],
+            "wrist_images": np.stack(
+                [
+                    np.asarray(obs["images"]["cam_left_wrist"], dtype=np.uint8),
+                    np.asarray(obs["images"]["cam_right_wrist"], dtype=np.uint8),
+                ],
+                axis=0,
+            )[None, ...],
+            "extra_view_images": None,
+            "task_descriptions": [obs["prompt"]],
         }
 
         infer_start = time.time()
-        processed_obs = self._model.input_transform(batched_obs, transpose=False)
-        processed_obs = self._model.precision_processor(processed_obs)
-        observation = _model.Observation.from_dict(processed_obs)
-        outputs = self._model.sample_actions(
-            observation,
+        actions, _ = self._model.predict_action_batch(
+            env_obs=env_obs,
             mode="eval",
             compute_values=False,
         )
-        actions = self._model.output_transform(
-            {"actions": outputs["actions"], "state": observation.state}
-        )["actions"]
 
         if torch.is_tensor(actions):
             actions = actions.detach().cpu().numpy()
