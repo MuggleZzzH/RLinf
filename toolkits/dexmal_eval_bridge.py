@@ -51,9 +51,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="Prompt sent to the policy.")
 
     parser.add_argument("--action-horizon", type=int, default=ACTION_HORIZON, help="Action chunk length to execute.")
-    parser.add_argument("--action-scale", type=float, default=0.35, help="Action interpolation factor toward each model target.")
-    parser.add_argument("--max-joint-delta", type=float, default=0.04, help="Per-step joint delta limit in radians.")
-    parser.add_argument("--max-gripper-delta", type=float, default=0.006, help="Per-step gripper delta limit.")
+    parser.add_argument("--action-scale", type=float, default=1.0, help="Action interpolation factor toward each model target.")
+    parser.add_argument("--max-joint-delta", type=float, default=0.08, help="Per-step joint delta limit in radians.")
+    parser.add_argument("--max-gripper-delta", type=float, default=0.01, help="Per-step gripper delta limit.")
 
     parser.add_argument("--set-model-mode-on-start", action="store_true", help="Switch robot to model mode on startup.")
     parser.add_argument("--set-stop-mode-on-exit", action="store_true", help="Switch robot to stop mode on exit.")
