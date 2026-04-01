@@ -215,15 +215,19 @@ class _RLinfCheckpointPolicy:
         import torch
 
         env_obs = {
-            "states": np.asarray(obs["state"], dtype=np.float32)[None, ...],
-            "main_images": np.asarray(obs["images"]["cam_high"], dtype=np.uint8)[None, ...],
-            "wrist_images": np.stack(
-                [
-                    np.asarray(obs["images"]["cam_left_wrist"], dtype=np.uint8),
-                    np.asarray(obs["images"]["cam_right_wrist"], dtype=np.uint8),
-                ],
-                axis=0,
-            )[None, ...],
+            "states": torch.from_numpy(np.asarray(obs["state"], dtype=np.float32)[None, ...]).contiguous(),
+            "main_images": torch.from_numpy(
+                np.asarray(obs["images"]["cam_high"], dtype=np.uint8)[None, ...]
+            ).contiguous(),
+            "wrist_images": torch.from_numpy(
+                np.stack(
+                    [
+                        np.asarray(obs["images"]["cam_left_wrist"], dtype=np.uint8),
+                        np.asarray(obs["images"]["cam_right_wrist"], dtype=np.uint8),
+                    ],
+                    axis=0,
+                )[None, ...]
+            ).contiguous(),
             "extra_view_images": None,
             "task_descriptions": [obs["prompt"]],
         }
