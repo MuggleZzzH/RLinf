@@ -23,6 +23,11 @@ from rlinf.envs.realworld.franka.tasks.peg_insertion_env import (
 )
 
 register(
+    id="FrankaEnv-v1",
+    entry_point="rlinf.envs.realworld.franka.franka_env:FrankaEnv",
+)
+
+register(
     id="PegInsertionEnv-v1",
     entry_point="rlinf.envs.realworld.franka.tasks:PegInsertionEnv",
 )

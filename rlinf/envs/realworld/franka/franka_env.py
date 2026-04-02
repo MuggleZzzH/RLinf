@@ -17,7 +17,7 @@ import queue
 import time
 from dataclasses import dataclass, field
 from itertools import cycle
-from typing import Optional
+from typing import Any, Optional
 
 import cv2
 import gymnasium as gym
@@ -82,25 +82,39 @@ class FrankaRobotConfig:
     binary_gripper_threshold: float = 0.5
     enable_gripper_penalty: bool = True
     gripper_penalty: float = 0.1
+    reward_scale: float = 1.0  # Scale dense reward to make training stable.
+    task_description: str = ""
     save_video_path: Optional[str] = None
     joint_reset_cycle: int = 20000  # Number of resets before resetting joints
     success_hold_steps: int = (
         1  # Default to 1 to maintain backward compatibility (immediate success)
     )
 
+    def __post_init__(self):
+        self.target_ee_pose = np.array(self.target_ee_pose)
+        self.reset_ee_pose = np.array(self.reset_ee_pose)
+        self.reward_threshold = np.array(self.reward_threshold)
+        self.action_scale = np.array(self.action_scale)
+        self.ee_pose_limit_min = np.array(self.ee_pose_limit_min)
+        self.ee_pose_limit_max = np.array(self.ee_pose_limit_max)
+
 
 class FrankaEnv(gym.Env):
     """Franka robot arm environment."""
 
+    CONFIG_CLS: type[FrankaRobotConfig] = FrankaRobotConfig
+
     def __init__(
         self,
-        config: FrankaRobotConfig,
+        override_cfg: dict[str, Any],
         worker_info: Optional[WorkerInfo],
         hardware_info: Optional[FrankaHWInfo],
         env_idx: int,
     ):
         self._logger = get_logger()
+        config = self.CONFIG_CLS(**override_cfg)
         self.config = config
+        self._task_description = config.task_description
         self.hardware_info = hardware_info
         self.env_idx = env_idx
         self.node_rank = 0
@@ -155,6 +169,10 @@ class FrankaEnv(gym.Env):
         self._open_cameras()
         # Video player for displaying camera frames
         self.camera_player = VideoPlayer(self.config.enable_camera_player)
+
+    @property
+    def task_description(self):
+        return self._task_description
 
     def _setup_hardware(self):
         from .franka_controller import FrankaController
@@ -298,6 +316,7 @@ class FrankaEnv(gym.Env):
                 self._success_hold_counter = 0
                 if self.config.use_dense_reward:
                     reward = np.exp(-500 * np.sum(np.square(target_delta[:3])))
+                    reward *= self.config.reward_scale
                 else:
                     reward = 0.0
                 self._logger.debug(
@@ -598,3 +617,10 @@ class FrankaEnv(gym.Env):
             ]
         ).copy()
         return tgt
+
+    def get_tcp_pose(self) -> np.ndarray:
+        self._franka_state = self._controller.get_state().wait()[0]
+        return self._franka_state.tcp_pose
+
+    def get_action_scale(self) -> np.ndarray:
+        return self.config.action_scale
