@@ -17,8 +17,16 @@ from gymnasium.envs.registration import register
 from rlinf.envs.realworld.xsquare.tasks.button_env import (
     ButtonEnv as ButtonEnv,
 )
+from rlinf.envs.realworld.xsquare.tasks.deploy_env import (
+    Turtle2DeployEnv as Turtle2DeployEnv,
+)
 
 register(
     id="ButtonEnv-v1",
     entry_point="rlinf.envs.realworld.xsquare.tasks:ButtonEnv",
+)
+
+register(
+    id="Turtle2DeployEnv-v1",
+    entry_point="rlinf.envs.realworld.xsquare.tasks:Turtle2DeployEnv",
 )

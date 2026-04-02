@@ -83,6 +83,22 @@ class RealWorldEnv(gym.Env):
             hardware_info=hardware_info,
             env_idx=env_idx,
         )
+        wrap_obs_mode = str(self.cfg.get("wrap_obs_mode", "simple"))
+        if wrap_obs_mode == "x2robot_raw":
+            if self.cfg.get("no_gripper", False):
+                raise ValueError(
+                    "wrap_obs_mode='x2robot_raw' requires no_gripper=False."
+                )
+            if self.cfg.get("use_spacemouse", False):
+                raise ValueError(
+                    "wrap_obs_mode='x2robot_raw' does not support SpacemouseIntervention."
+                )
+            if self.cfg.get("keyboard_reward_wrapper", None):
+                raise ValueError(
+                    "wrap_obs_mode='x2robot_raw' does not support keyboard reward wrappers."
+                )
+            return env
+
         if self.cfg.get("no_gripper", True):
             env = GripperCloseEnv(env)
         if not env.config.is_dummy and self.cfg.get("use_spacemouse", True):

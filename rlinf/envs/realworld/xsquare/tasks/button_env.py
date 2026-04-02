@@ -67,6 +67,7 @@ class ButtonEnvConfig(Turtle2RobotConfig):
         self.ee_pose_limit_max[:, 3] += self.clip_rz_range
         self.ee_pose_limit_max[:, 4] += self.clip_rz_range
         self.ee_pose_limit_max[:, 5] += self.clip_rz_range
+        super().__post_init__()
 
 
 class ButtonEnv(Turtle2Env):
