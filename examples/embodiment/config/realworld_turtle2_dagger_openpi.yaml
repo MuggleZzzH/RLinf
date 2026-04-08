@@ -132,7 +132,7 @@ rollout:
   collect_prev_infos: False
 
   model:
-    model_path: MODEL_PATH
+    model_path: /home/user/zjh_projects/checkpoints/fold_towel_pytorch
     precision: ${actor.model.precision}
 
 actor:
