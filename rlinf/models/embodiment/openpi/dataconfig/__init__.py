@@ -405,6 +405,7 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(action_horizon=30),
         data=LeRobotX2RobotDataConfig(
             repo_id="RLinf/Turtle2-X2Robot-S2S",
+            mode="s2s",
             base_config=DataConfig(prompt_from_task=True),
             assets=AssetsConfig(
                 assets_dir="checkpoints/torch/pi0_turtle2_x2robot_s2s/assets"
@@ -416,6 +417,23 @@ _CONFIGS = [
             "checkpoints/jax/pi0_base/params"
         ),
         pytorch_weight_path="checkpoints/torch/pi0_base",
+    ),
+    TrainConfig(
+        name="fold_towel_s2s",
+        model=pi0_config.Pi0Config(action_horizon=30),
+        data=LeRobotX2RobotDataConfig(
+            repo_id="fold_towel_gqy_0317,fold_towel_gqy_0318",
+            mode="s2s",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(assets_dir="checkpoints/torch/pi0_base/assets"),
+            action_dim=14,
+            use_delta_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "checkpoints/jax/pi0_base/params"
+        ),
+        pytorch_weight_path="checkpoints/torch/pi0_base",
+        exp_name="fold_towel_gqy_03170318_s2s_a30",
     ),
 ]
 
