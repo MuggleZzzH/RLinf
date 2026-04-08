@@ -474,7 +474,10 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         return result
 
     def obs_processor(self, env_obs):
-        if "x2robot" in self.config.config_name:
+        if (
+            "x2robot" in self.config.config_name
+            or self.config.config_name == "fold_towel_s2s"
+        ):
             extra_view_images = env_obs.get("extra_view_images")
             if extra_view_images is None or extra_view_images.shape[1] < 2:
                 raise ValueError(

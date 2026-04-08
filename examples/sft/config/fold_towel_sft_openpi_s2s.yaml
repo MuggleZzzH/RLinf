@@ -20,7 +20,7 @@ runner:
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "turtle2-openpi-s2s-sft"
+    experiment_name: "fold_towel_gqy_03170318_s2s_a30"
     logger_backends: ["tensorboard"]
   max_epochs: 30000
   max_steps: -1
@@ -28,7 +28,8 @@ runner:
   save_interval: 5000
 
 data:
-  train_data_paths: "/path/to/turtle2-x2robot-s2s-data"
+  # HF_LEROBOT_HOME root. The actual datasets are selected by actor.openpi_data.repo_id.
+  train_data_paths: "/path/to/lerobot-root"
 
 algorithm:
   adv_type: gae
@@ -42,18 +43,21 @@ actor:
 
   model:
     precision: null
-    model_path: "/path/to/pi0-model"
+    # RLinf SFT loads PyTorch weights from actor.model.model_path.
+    # This should point to the converted pi0_base checkpoint directory,
+    # not the JAX params path used by official openpi weight_loader.
+    model_path: "/path/to/checkpoints/torch/pi0_base"
     num_action_chunks: 30
     action_dim: 14
     add_value_head: False
     openpi:
-      config_name: "pi0_turtle2_x2robot_s2s"
+      config_name: "fold_towel_s2s"
       num_images_in_input: 3
       train_expert_only: False
       detach_critic_input: False
 
   openpi_data:
-    repo_id: "RLinf/Turtle2-X2Robot-S2S"
+    repo_id: "fold_towel_gqy_0317,fold_towel_gqy_0318"
     mode: "s2s"
     action_dim: 14
     use_delta_actions: false

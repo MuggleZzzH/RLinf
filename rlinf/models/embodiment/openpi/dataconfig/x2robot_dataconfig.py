@@ -25,6 +25,7 @@ from rlinf.models.embodiment.openpi.policies import x2robot_policy
 
 @dataclasses.dataclass(frozen=True)
 class LeRobotX2RobotDataConfig(DataConfigFactory):
+    mode: str = "s2s"
     action_dim: int = 14
     use_delta_actions: bool = False
     only_right_obs: bool = False
@@ -54,6 +55,12 @@ class LeRobotX2RobotDataConfig(DataConfigFactory):
     def create(
         self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
     ) -> DataConfig:
+        if self.mode != "s2s":
+            raise ValueError(
+                "RLinf Turtle2/X2Robot OpenPI integration currently supports only "
+                f"mode='s2s', got {self.mode!r}."
+            )
+
         data_transforms = _transforms.Group(
             inputs=[
                 x2robot_policy.X2RobotInputs(
