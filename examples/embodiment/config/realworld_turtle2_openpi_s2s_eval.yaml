@@ -90,7 +90,7 @@ rollout:
   collect_prev_infos: False
   sync_weight_nccl_max_ctas: 32
   model:
-    model_path: MODEL_PATH
+    model_path: /home/user/zjh_projects/checkpoints/fold_towel_pytorch
     precision: ${actor.model.precision}
 
 critic:
