@@ -343,4 +343,5 @@
    nft_openpi
    dagger
    hg-dagger
+   turtle2_dagger_takeover
    lingbotvla

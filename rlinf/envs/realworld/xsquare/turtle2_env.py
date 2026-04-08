@@ -470,6 +470,31 @@ class Turtle2Env(gym.Env):
     def task_description(self):
         return self.config.task_description
 
+    def get_arm_pose_snapshot(self) -> np.ndarray:
+        """Return the latest dual-arm raw pose snapshot.
+
+        The returned array always has shape ``(2, 7)`` and follows the
+        ``[x, y, z, roll, pitch, yaw, gripper]`` contract for
+        ``left/right`` arms.
+        """
+
+        return np.stack(
+            [
+                self._turtle2_state.follow1_pos.copy(),
+                self._turtle2_state.follow2_pos.copy(),
+            ]
+        )
+
+    def get_joint_snapshot(self) -> np.ndarray:
+        """Return the latest dual-arm joint snapshot."""
+
+        return np.stack(
+            [
+                self._turtle2_state.follow1_joints.copy(),
+                self._turtle2_state.follow2_joints.copy(),
+            ]
+        )
+
     def _calc_step_reward(
         self,
         observation: dict[str, np.ndarray],

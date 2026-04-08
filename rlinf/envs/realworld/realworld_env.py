@@ -31,6 +31,7 @@ from rlinf.envs.realworld.common.wrappers import (
     GripperCloseEnv,
     KeyboardRewardDoneMultiStageWrapper,
     KeyboardRewardDoneWrapper,
+    MasterTakeoverIntervention,
     Quat2EulerWrapper,
     RelativeFrame,
     SpacemouseIntervention,
@@ -94,9 +95,21 @@ class RealWorldEnv(gym.Env):
                 raise ValueError(
                     "wrap_obs_mode='x2robot_raw' does not support SpacemouseIntervention."
                 )
+            if self.cfg.get("use_gello", False):
+                raise ValueError(
+                    "wrap_obs_mode='x2robot_raw' does not support GelloIntervention."
+                )
             if self.cfg.get("keyboard_reward_wrapper", None):
                 raise ValueError(
                     "wrap_obs_mode='x2robot_raw' does not support keyboard reward wrappers."
+                )
+            if self.cfg.get("use_master_takeover", False):
+                env = MasterTakeoverIntervention(
+                    env,
+                    config=OmegaConf.to_container(
+                        self.cfg.get("master_takeover", OmegaConf.create({})),
+                        resolve=True,
+                    ),
                 )
             return env
 
