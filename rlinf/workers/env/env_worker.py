@@ -400,10 +400,8 @@ class EnvWorker(Worker):
         else:
             first_action = np.round(chunk_actions_np, 4).tolist()
         self.log_info(
-            "[EVAL DEBUG] stage=%d prepared_actions shape=%s first_action=%s",
-            stage_id,
-            tuple(chunk_actions_np.shape),
-            first_action,
+            f"[EVAL DEBUG] stage={stage_id} prepared_actions "
+            f"shape={tuple(chunk_actions_np.shape)} first_action={first_action}"
         )
         env_info = {}
 
@@ -1025,10 +1023,9 @@ class EnvWorker(Worker):
             if not self.cfg.env.eval.auto_reset or eval_rollout_epoch == 0:
                 for stage_id in range(self.stage_num):
                     self.log_info(
-                        "[EVAL DEBUG] explicit reset triggered epoch=%d stage=%d auto_reset=%s",
-                        eval_rollout_epoch,
-                        stage_id,
-                        self.cfg.env.eval.auto_reset,
+                        f"[EVAL DEBUG] explicit reset triggered "
+                        f"epoch={eval_rollout_epoch} stage={stage_id} "
+                        f"auto_reset={self.cfg.env.eval.auto_reset}"
                     )
                     self.eval_env_list[stage_id].is_start = True
                     extracted_obs, infos = self.eval_env_list[stage_id].reset()
@@ -1051,10 +1048,9 @@ class EnvWorker(Worker):
             for eval_step in range(self.n_eval_chunk_steps):
                 for stage_id in range(self.stage_num):
                     self.log_info(
-                        "[EVAL DEBUG] epoch=%d eval_step=%d stage=%d waiting rollout actions",
-                        eval_rollout_epoch,
-                        eval_step,
-                        stage_id,
+                        f"[EVAL DEBUG] epoch={eval_rollout_epoch} "
+                        f"eval_step={eval_step} stage={stage_id} "
+                        "waiting rollout actions"
                     )
                     raw_chunk_actions = self.recv_chunk_actions(
                         input_channel, mode="eval"
@@ -1063,11 +1059,9 @@ class EnvWorker(Worker):
                         raw_chunk_actions, stage_id
                     )
                     self.log_info(
-                        "[EVAL DEBUG] epoch=%d eval_step=%d stage=%d env_info_keys=%s",
-                        eval_rollout_epoch,
-                        eval_step,
-                        stage_id,
-                        sorted(env_info.keys()),
+                        f"[EVAL DEBUG] epoch={eval_rollout_epoch} "
+                        f"eval_step={eval_step} stage={stage_id} "
+                        f"env_info_keys={sorted(env_info.keys())}"
                     )
 
                     for key, value in env_info.items():
