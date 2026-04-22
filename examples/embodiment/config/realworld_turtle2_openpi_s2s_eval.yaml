@@ -27,7 +27,7 @@ cluster:
   node_groups:
     - label: "4090"
       node_ranks: 0-0
-      env_configs:
+      env_configs: 
         - node_ranks: 0-0
     - label: turtle2
       node_ranks: 1-1
@@ -90,7 +90,7 @@ rollout:
   collect_prev_infos: False
   sync_weight_nccl_max_ctas: 32
   model:
-    model_path: /home/user/zjh_projects/checkpoints/fold_towel_pytorch
+    model_path: /home/zxcx/Jiahao/checkpoints/fold_towel_pytorch
     precision: ${actor.model.precision}
 
 critic:

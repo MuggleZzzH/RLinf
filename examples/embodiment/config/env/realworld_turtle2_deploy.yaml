@@ -16,7 +16,7 @@ no_gripper: False
 main_image_key: wrist_2
 
 video_cfg:
-  save_video: True
+  save_video: False
   info_on_video: True
   video_base_dir: ${runner.logger.log_path}/video/eval
 
