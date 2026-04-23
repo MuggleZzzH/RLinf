@@ -16,11 +16,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from rlinf.envs.realworld.xsquare.turtle2_env import Turtle2Env, Turtle2RobotConfig
+from rlinf.envs.realworld.xsquare.x1_env import X1Env, X1RobotConfig
 
 
 @dataclass
-class ButtonEnvConfig(Turtle2RobotConfig):
+class ButtonEnvConfig(X1RobotConfig):
     random_xy_range: float = 0.05
     clip_x_range: float = 0.05
     clip_y_range: float = 0.05
@@ -69,8 +69,8 @@ class ButtonEnvConfig(Turtle2RobotConfig):
         self.ee_pose_limit_max[:, 5] += self.clip_rz_range
 
 
-class ButtonEnv(Turtle2Env):
-    """Button pressing task environment for Turtle2 robot."""
+class ButtonEnv(X1Env):
+    """Button pressing task environment for X1 robot."""
 
     def __init__(self, override_cfg, worker_info=None, hardware_info=None, env_idx=0):
         # Update config according to current env

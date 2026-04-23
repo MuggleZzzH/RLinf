@@ -21,18 +21,18 @@ from cv_bridge import CvBridge
 
 # import rospkg
 # rospack = rospkg.RosPack()
-# package_path = rospack.get_path('turtle2_controller')
-# sys.path.append(os.path.join(rospack_path, 'turtle2_controller'))
-from turtle2_basic.turtle2_controller.Turtle2Controller import Turtle2Controller
+# package_path = rospack.get_path('x1_controller')
+# sys.path.append(os.path.join(rospack_path, 'x1_controller'))
+from turtle2_basic.turtle2_controller.Turtle2Controller import Turtle2Controller as X1Controller
 
 from rlinf.scheduler import Cluster, NodePlacementStrategy, Worker
 from rlinf.utils.logging import get_logger
 
-from .turtle2_robot_state import Turtle2RobotState
+from .x1_robot_state import X1RobotState
 
 
-class Turtle2SmoothController(Worker):
-    """Controller for turtle2 robot, XSquare"""
+class X1SmoothController(Worker):
+    """Controller for x1 robot, XSquare"""
 
     @staticmethod
     def launch_controller(
@@ -41,7 +41,7 @@ class Turtle2SmoothController(Worker):
         node_rank: int = 0,
         worker_rank: int = 0,
     ):
-        """Launch a Turtle2SmoothController on the specified worker's node.
+        """Launch a X1SmoothController on the specified worker's node.
 
         Args:
             freq (int): The interpolate frequency for the controller.
@@ -49,28 +49,28 @@ class Turtle2SmoothController(Worker):
             worker_rank (int): The rank of the env worker to the controller is associated with.
 
         Returns:
-            Turtle2SmoothController: The launched Turtle2SmoothController instance.
+            X1SmoothController: The launched X1SmoothController instance.
         """
         cluster = Cluster()
         placement = NodePlacementStrategy(node_ranks=[node_rank])
-        return Turtle2SmoothController.create_group(freq).launch(
+        return X1SmoothController.create_group(freq).launch(
             cluster=cluster,
             placement_strategy=placement,
-            name=f"Turtle2SmoothController-{worker_rank}-{env_idx}",
+            name=f"X1SmoothController-{worker_rank}-{env_idx}",
         )
 
     def __init__(self, freq=50):
         super().__init__()
         self._logger = get_logger()
         # FIXME: should move to roscontroller
-        rospy.init_node("Turtle2_Smooth_Controller_Node")
+        rospy.init_node("X1_Smooth_Controller_Node")
         self.bridge = CvBridge()
         # FIXME: should rewrite with roscontroller
-        self.controller = Turtle2Controller()
+        self.controller = X1Controller()
 
         self.controller.chassis_set_current_pose_as_virtual_zero()
 
-        self._state = Turtle2RobotState()
+        self._state = X1RobotState()
 
         control_period = rospy.Duration(1 / freq)
         state_period = rospy.Duration(1 / 200.0)

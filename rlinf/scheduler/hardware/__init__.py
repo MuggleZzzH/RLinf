@@ -27,8 +27,8 @@ from .robots import (
     DualFrankaHWInfo,
     FrankaConfig,
     FrankaHWInfo,
-    Turtle2Config,
-    Turtle2HWInfo,
+    X1Config,
+    X1HWInfo,
 )
 
 __all__ = [
@@ -46,6 +46,6 @@ __all__ = [
     "DualFrankaHWInfo",
     "FrankaConfig",
     "FrankaHWInfo",
-    "Turtle2Config",
-    "Turtle2HWInfo",
+    "X1Config",
+    "X1HWInfo",
 ]

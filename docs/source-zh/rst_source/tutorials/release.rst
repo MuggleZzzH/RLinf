@@ -6,14 +6,14 @@ RLinf v0.2 版本发布
 
 🎉 我们发布 RLinf v0.2。
 
-RLinf v0.2 聚焦两个核心方向：**真实世界强化学习（Real-World RL）**与**多智能体强化学习系统（Multi-agent RL）**。围绕这一目标，RLinf 现已支持包括 **XSquare Turtle2 Arms** 与 **Franka Arm** 在内的真实平台，并提供更丰富的具身基准、模拟器、模型与算法组合，以及面向高吞吐场景的**原生异步训练能力**。本次发布还进一步增强了 real-world、sim-to-real、协同训练流程，以及数据与 replay 基础设施的鲁棒性和训练稳定性。面向多智能体训练，RLinf 提供了**原生且可扩展的多智能体算法与统一数据接口**，降低了开发与扩展门槛，并可快速复现如 **WideSeek-R1** 这类先进训练方案。
+RLinf v0.2 聚焦两个核心方向：**真实世界强化学习（Real-World RL）**与**多智能体强化学习系统（Multi-agent RL）**。围绕这一目标，RLinf 现已支持包括 **XSquare X1 Arms** 与 **Franka Arm** 在内的真实平台，并提供更丰富的具身基准、模拟器、模型与算法组合，以及面向高吞吐场景的**原生异步训练能力**。本次发布还进一步增强了 real-world、sim-to-real、协同训练流程，以及数据与 replay 基础设施的鲁棒性和训练稳定性。面向多智能体训练，RLinf 提供了**原生且可扩展的多智能体算法与统一数据接口**，降低了开发与扩展门槛，并可快速复现如 **WideSeek-R1** 这类先进训练方案。
 
 具身智能
 ^^^^^^^^
 
 1. 核心能力升级（重点：真实机器人 RL 与世界模型）
 
-- 支持基于 :doc:`XSquare Turtle2 <../examples/embodied/xsquare_turtle2>` Arms 的真实世界强化学习
+- 支持基于 :doc:`XSquare X1 <../examples/embodied/xsquare_x1>` Arms 的真实世界强化学习
 
 - 支持将世界模型作为 RL 训练模拟器，包括 :doc:`OpenSora <../examples/embodied/opensora>`、:doc:`Wan <../examples/embodied/wan>`、:doc:`WoVR <../publications/wovr>`
 

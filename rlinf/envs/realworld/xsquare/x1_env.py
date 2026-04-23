@@ -24,16 +24,16 @@ import gymnasium as gym
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from rlinf.envs.realworld.xsquare.turtle2_robot_state import Turtle2RobotState
+from rlinf.envs.realworld.xsquare.x1_robot_state import X1RobotState
 from rlinf.scheduler import (
-    Turtle2HWInfo,
+    X1HWInfo,
     WorkerInfo,
 )
 from rlinf.utils.logging import get_logger
 
 
 @dataclass
-class Turtle2RobotConfig:
+class X1RobotConfig:
     use_camera_ids: list[int] = field(default_factory=lambda: [2])  # [0, 1, 2]
     use_arm_ids: list[int] = field(default_factory=lambda: [1])  # [0, 1]
 
@@ -81,8 +81,8 @@ class Turtle2RobotConfig:
     save_video_path: Optional[str] = None
 
 
-class Turtle2Env(gym.Env):
-    """Gymnasium environment wrapping the Turtle2 dual-arm robot.
+class X1Env(gym.Env):
+    """Gymnasium environment wrapping the X1 dual-arm robot.
 
     Supports single- and dual-arm control with optional camera observations,
     dense/sparse rewards, safety-box clipping, and a dummy mode for offline use.
@@ -90,17 +90,17 @@ class Turtle2Env(gym.Env):
 
     def __init__(
         self,
-        config: Turtle2RobotConfig,
+        config: X1RobotConfig,
         worker_info: Optional[WorkerInfo],
-        hardware_info: Optional[Turtle2HWInfo],
+        hardware_info: Optional[X1HWInfo],
         env_idx: int,
     ) -> None:
-        """Initialize Turtle2Env.
+        """Initialize X1Env.
 
         Args:
             config: Robot and environment configuration.
             worker_info: Scheduler worker info used to resolve node/worker rank.
-            hardware_info: Hardware descriptor for the Turtle2 platform.
+            hardware_info: Hardware descriptor for the X1 platform.
             env_idx: Index of this environment instance within its worker.
         """
         self._logger = get_logger()
@@ -119,7 +119,7 @@ class Turtle2Env(gym.Env):
         assert (
             len(self.config.use_camera_ids) > 0 and len(self.config.use_camera_ids) <= 3
         ), "please choose camera IDs from [0, 1, 2]."
-        self._turtle2_state = Turtle2RobotState()
+        self._x1_state = X1RobotState()
         self._num_steps = 0
 
         if not self.config.is_dummy:
@@ -133,19 +133,19 @@ class Turtle2Env(gym.Env):
 
         # Wait for the first frame
         self._reset_arms()
-        self._turtle2_state = self._controller.get_state().wait()[0]
+        self._x1_state = self._controller.get_state().wait()[0]
 
         # Init cameras
         self._check_cameras()
         # Video player for displaying camera frames
 
     def _setup_hardware(self):
-        from .turtle2_smooth_controller import Turtle2SmoothController
+        from .x1_smooth_controller import X1SmoothController
 
-        assert self.env_idx >= 0, "env_idx must be set for Turtle2Env."
+        assert self.env_idx >= 0, "env_idx must be set for X1Env."
 
         # Launch Turtle controller
-        self._controller = Turtle2SmoothController.launch_controller(
+        self._controller = X1SmoothController.launch_controller(
             freq=self.config.smooth_frequency,
             env_idx=self.env_idx,
             node_rank=self.node_rank,
@@ -314,7 +314,7 @@ class Turtle2Env(gym.Env):
         # Reset
         self._reset_arms()
         self._num_steps = 0
-        self._turtle2_state = self._controller.get_state().wait()[0]
+        self._x1_state = self._controller.get_state().wait()[0]
         observation = self._get_observation()
         # save if debug
         # for key in observation["frames"].keys():
@@ -357,9 +357,9 @@ class Turtle2Env(gym.Env):
         action = action.reshape(-1, 7)
         xyz_delta = action[:, :3]
 
-        # self._turtle2_state = self._controller.get_state().wait()[0]
-        next_position1 = self._turtle2_state.follow1_pos.copy()
-        next_position2 = self._turtle2_state.follow2_pos.copy()
+        # self._x1_state = self._controller.get_state().wait()[0]
+        next_position1 = self._x1_state.follow1_pos.copy()
+        next_position2 = self._x1_state.follow2_pos.copy()
 
         if 0 in self.config.use_arm_ids:
             next_position1[:3] = (
@@ -408,9 +408,9 @@ class Turtle2Env(gym.Env):
         time.sleep(max(0, (1.0 / self.config.step_frequency) - step_time))
 
         if not self.config.is_dummy:
-            self._turtle2_state = self._controller.get_state().wait()[0]
+            self._x1_state = self._controller.get_state().wait()[0]
         else:
-            self._turtle2_state = self._turtle2_state
+            self._x1_state = self._x1_state
         observation = self._get_observation()
         reward = self._calc_step_reward(observation)
         terminated = reward == 1
@@ -437,8 +437,8 @@ class Turtle2Env(gym.Env):
         """
         if not self.config.is_dummy:
             # Convert orientation to euler angles
-            position1 = self._turtle2_state.follow1_pos[0:6]
-            position2 = self._turtle2_state.follow2_pos[0:6]
+            position1 = self._x1_state.follow1_pos[0:6]
+            position2 = self._x1_state.follow2_pos[0:6]
             delta1 = np.abs(position1 - self.config.target_ee_pose[0, 0:6])
             delta2 = np.abs(position2 - self.config.target_ee_pose[1, 0:6])
 
@@ -539,14 +539,14 @@ class Turtle2Env(gym.Env):
             tcp_pose = []
             if 0 in self.config.use_arm_ids:
                 tmp = np.zeros(7)
-                tmp[0:3] = self._turtle2_state.follow1_pos[0:3]
-                r1 = R.from_euler("xyz", self._turtle2_state.follow1_pos[3:6])
+                tmp[0:3] = self._x1_state.follow1_pos[0:3]
+                r1 = R.from_euler("xyz", self._x1_state.follow1_pos[3:6])
                 tmp[3:7] = r1.as_quat()
                 tcp_pose.append(tmp.copy())
             if 1 in self.config.use_arm_ids:
                 tmp = np.zeros(7)
-                tmp[0:3] = self._turtle2_state.follow2_pos[0:3]
-                r2 = R.from_euler("xyz", self._turtle2_state.follow2_pos[3:6])
+                tmp[0:3] = self._x1_state.follow2_pos[0:3]
+                r2 = R.from_euler("xyz", self._x1_state.follow2_pos[3:6])
                 tmp[3:7] = r2.as_quat()
                 tcp_pose.append(tmp.copy())
             tcp_pose = np.concatenate(tcp_pose, axis=0)

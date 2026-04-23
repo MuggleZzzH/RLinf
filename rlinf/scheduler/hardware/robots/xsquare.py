@@ -25,21 +25,21 @@ from ..hardware import (
 
 
 @dataclass
-class Turtle2HWInfo(HardwareInfo):
+class X1HWInfo(HardwareInfo):
     """Hardware information for a robotic system."""
 
-    config: "Turtle2Config"
+    config: "X1Config"
 
 
 @Hardware.register()
-class Turtle2Robot(Hardware):
+class X1Robot(Hardware):
     """Hardware policy for robotic systems."""
 
-    HW_TYPE = "Turtle2"
+    HW_TYPE = "X1"
 
     @classmethod
     def enumerate(
-        cls, node_rank: int, configs: Optional[list["Turtle2Config"]] = None
+        cls, node_rank: int, configs: Optional[list["X1Config"]] = None
     ) -> Optional[HardwareResource]:
         """Enumerate the robot resources on a node.
 
@@ -51,30 +51,30 @@ class Turtle2Robot(Hardware):
             Optional[HardwareResource]: An object representing the hardware resources. None if no hardware is found.
         """
         assert configs is not None, "Robot hardware requires explicit configurations"
-        robot_configs: list["Turtle2Config"] = []
+        robot_configs: list["X1Config"] = []
         for config in configs:
-            if isinstance(config, Turtle2Config) and config.node_rank == node_rank:
+            if isinstance(config, X1Config) and config.node_rank == node_rank:
                 robot_configs.append(config)
 
         if robot_configs:
-            turtle2_infos = []
+            x1_infos = []
 
             for config in robot_configs:
-                turtle2_infos.append(
-                    Turtle2HWInfo(
+                x1_infos.append(
+                    X1HWInfo(
                         type=cls.HW_TYPE,
                         model=cls.HW_TYPE,
                         config=config,
                     )
                 )
 
-            return HardwareResource(type=cls.HW_TYPE, infos=turtle2_infos)
+            return HardwareResource(type=cls.HW_TYPE, infos=x1_infos)
         return None
 
 
-@NodeHardwareConfig.register_hardware_config(Turtle2Robot.HW_TYPE)
+@NodeHardwareConfig.register_hardware_config(X1Robot.HW_TYPE)
 @dataclass
-class Turtle2Config(HardwareConfig):
+class X1Config(HardwareConfig):
     """Configuration for a robotic system."""
 
     # empty config
@@ -82,5 +82,5 @@ class Turtle2Config(HardwareConfig):
     def __post_init__(self):
         """Post-initialization to validate the configuration."""
         assert isinstance(self.node_rank, int), (
-            f"'node_rank' in Turtle2 config must be an integer. But got {type(self.node_rank)}."
+            f"'node_rank' in X1 config must be an integer. But got {type(self.node_rank)}."
         )

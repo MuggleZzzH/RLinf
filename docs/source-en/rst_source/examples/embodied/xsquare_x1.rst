@@ -1,8 +1,8 @@
-Real-World RL with XSquare Turtle2
+Real-World RL with XSquare X1
 ====================================
 
 This document provides a comprehensive guide to launching real-world reinforcement
-learning training on the **XSquare Turtle2** dual-arm robot platform using the
+learning training on the **XSquare X1** dual-arm robot platform using the
 RLinf framework.
 
 The primary objective is to train a ResNet-based CNN policy from scratch for robotic
@@ -17,7 +17,7 @@ Environment
 
 **Real-World Environment**
 
-- **Robot**: XSquare Turtle2 – a dual-arm tabletop robot with up to 2 arms (left arm ID ``0``, right arm ID ``1``) and up to 3 RGB cameras (IDs ``0``, ``1``, ``2``).
+- **Robot**: XSquare X1 – a dual-arm tabletop robot with up to 2 arms (left arm ID ``0``, right arm ID ``1``) and up to 3 RGB cameras (IDs ``0``, ``1``, ``2``).
 - **Task**: Currently we support the **button-pressing** task (``ButtonEnv``):
 
   - The robot end-effector moves downward to press a button located at a target pose.
@@ -80,7 +80,7 @@ Hardware Setup
 
 The real-world setup requires:
 
-- **Robot**: XSquare Turtle2 dual-arm robot
+- **Robot**: XSquare X1 dual-arm robot
 - **Cameras**: Up to 3 RGB cameras mounted on the robot (IDs 0–2)
 - **Training / Rollout Node**: A computer with GPU support for running the CNN policy
 - **Robot Controller Node**: A small computer (GPU not required) connected to the robot in the same local network
@@ -98,7 +98,7 @@ The controller node and the training/rollout node(s) require different software 
 Robot Controller Node
 ~~~~~~~~~~~~~~~~~~~~~
 
-The XSquare Turtle2 platform ships with its own SDK and ROS-based controller stack. **Please ensure that you have entered the official Docker container of Xsquare before starting the following installation.**. Contact `XSquare <https://x2robot.com>`_
+The XSquare X1 platform ships with its own SDK and ROS-based controller stack. **Please ensure that you have entered the official Docker container of Xsquare before starting the following installation.**. Contact `XSquare <https://x2robot.com>`_
 for the exact Docker image and startup instructions.
 
 After entering the XSquare Docker container, clone the RLinf repository inside it:
@@ -115,14 +115,14 @@ Then install the RLinf Python dependencies for the embodied real-world setup:
 .. code:: bash
 
    # For mainland China users, you can add the `--use-mirror` flag for better speed.
-   bash requirements/install.sh embodied --env xsquare_turtle2
+   bash requirements/install.sh embodied --env xsquare_x1
    source .venv/bin/activate
 
 .. note::
 
-   On the Turtle2 controller node, we recommend a **dual-container split** to reduce ROS ownership conflicts:
+   On the X1 controller node, we recommend a **dual-container split** to reduce ROS ownership conflicts:
 
-   - The **control container** (for example, the vendor-provided Turtle2 control container such as ``turtle2_release``) owns the ROS master, UI, low-level bring-up, and the camera / arm control nodes.
+   - The **control container** (for example, the vendor-provided X1 control container such as ``x1_release``) owns the ROS master, UI, low-level bring-up, and the camera / arm control nodes.
    - A **separate RLinf container** only runs RLinf and the Ray worker, and should not directly own ``roscore``, the UI, or ``run.sh``.
 
    The RLinf container should be built from an image configuration that is **compatible with the control container**, ideally sharing the same base image, system dependencies, ROS runtime, and required mounts, while only adding the RLinf Python environment and code on top. This reduces drift in ROS dependencies, message definitions, and device access.
@@ -254,7 +254,7 @@ Run ``ray status`` to verify the cluster is up.
 Configuration File
 ~~~~~~~~~~~~~~~~~~
 
-Modify ``examples/embodiment/config/realworld_button_turtle2_sac_cnn.yaml`` to match
+Modify ``examples/embodiment/config/realworld_button_x1_sac_cnn.yaml`` to match
 your setup.
 
 Key fields to update:
@@ -271,15 +271,15 @@ Key fields to update:
         node_group: "gpu"
         placement: 0
       env:
-        node_group: turtle2
+        node_group: x1
         placement: 0
     node_groups:
       - label: "gpu"
         node_ranks: 0
-      - label: turtle2
+      - label: x1
         node_ranks: 1
         hardware:
-          type: Turtle2
+          type: X1
           configs:
             - node_rank: 1
 
@@ -320,7 +320,7 @@ Run on the head node:
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_realworld_async.sh realworld_dummy_turtle2_sac_cnn
+   bash examples/embodiment/run_realworld_async.sh realworld_dummy_x1_sac_cnn
 
 Running the Experiment
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -329,7 +329,7 @@ After verifying the setup, start the real-world training experiment on the head 
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_realworld_async.sh realworld_button_turtle2_sac_cnn
+   bash examples/embodiment/run_realworld_async.sh realworld_button_x1_sac_cnn
 
 Visualization and Results
 --------------------------

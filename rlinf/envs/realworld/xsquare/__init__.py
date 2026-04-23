@@ -13,6 +13,6 @@
 # limitations under the License.
 
 
-from .turtle2_env import Turtle2Env, Turtle2RobotConfig, Turtle2RobotState
+from .x1_env import X1Env, X1RobotConfig, X1RobotState
 
-__all__ = ["Turtle2Env", "Turtle2RobotState", "Turtle2RobotConfig"]
+__all__ = ["X1Env", "X1RobotState", "X1RobotConfig"]

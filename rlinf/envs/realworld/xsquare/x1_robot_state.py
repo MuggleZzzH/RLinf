@@ -18,8 +18,8 @@ import numpy as np
 
 
 @dataclass
-class Turtle2RobotState:
-    """Turtle2 robot state including followers, head, lift, and car pose.
+class X1RobotState:
+    """X1 robot state including followers, head, lift, and car pose.
 
     Attributes:
         follow1_pos: Follower 1 position (7-dim).

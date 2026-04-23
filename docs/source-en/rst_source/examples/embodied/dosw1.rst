@@ -14,7 +14,7 @@ while the right arm stays at its home position.
 
 The example trains a **Flow Matching policy** with a **ResNet-10** visual
 encoder via **SAC**, following the same real-world RL recipe used for
-:doc:`franka` and :doc:`xsquare_turtle2`.
+:doc:`franka` and :doc:`xsquare_x1`.
 
 Environment
 -----------

@@ -6,14 +6,14 @@ RLinf v0.2 Release
 
 🎉 Introducing RLinf v0.2.
 
-RLinf v0.2 focuses on two major directions: **Real-World RL** and **Multi-agent RL** systems. To support these goals, RLinf now supports real-world platforms including **XSquare Turtle2 Arms** and the **Franka Arm**, while offering a richer set of embodied benchmarks, simulators, models, algorithms, together with **native asynchronous training** designed for high-throughput workloads. This release also strengthens real-world deployment, sim-to-real, and co-training workflows, alongside more robust data and replay infrastructure and improved training stability. For multi-agent training, RLinf introduces **native multi-agent support** for extensible multi-agent RL algorithms and unified data interfaces, lowering the barrier to developing and scaling multi-agent workloads while enabling rapid reproduction of advanced training solutions such as **WideSeek-R1**.
+RLinf v0.2 focuses on two major directions: **Real-World RL** and **Multi-agent RL** systems. To support these goals, RLinf now supports real-world platforms including **XSquare X1 Arms** and the **Franka Arm**, while offering a richer set of embodied benchmarks, simulators, models, algorithms, together with **native asynchronous training** designed for high-throughput workloads. This release also strengthens real-world deployment, sim-to-real, and co-training workflows, alongside more robust data and replay infrastructure and improved training stability. For multi-agent training, RLinf introduces **native multi-agent support** for extensible multi-agent RL algorithms and unified data interfaces, lowering the barrier to developing and scaling multi-agent workloads while enabling rapid reproduction of advanced training solutions such as **WideSeek-R1**.
 
 Embodied Intelligence
 ^^^^^^^^^^^^^^^^^^^^^
 
 1. Core Capability Upgrades, highlighting Real-World Robotics RL and World Models
 
-- Supported Real-World RL with :doc:`XSquare Turtle2 <../examples/embodied/xsquare_turtle2>`.
+- Supported Real-World RL with :doc:`XSquare X1 <../examples/embodied/xsquare_x1>`.
 
 - Supported World Models as simulators for RL training, including :doc:`OpenSora <../examples/embodied/opensora>`, :doc:`Wan <../examples/embodied/wan>`, and :doc:`WoVR <../publications/wovr>`.
 

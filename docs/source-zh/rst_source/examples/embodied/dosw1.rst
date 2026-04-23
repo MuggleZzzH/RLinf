@@ -12,7 +12,7 @@ Dexmal DOS-W1 真机强化学习
 过程中保持 home 位。
 
 该示例使用 **Flow Matching 策略 + ResNet-10 视觉编码器**，通过 **SAC**
-进行训练，整体流程与 :doc:`franka` / :doc:`xsquare_turtle2` 的真机 RL 管线一致。
+进行训练，整体流程与 :doc:`franka` / :doc:`xsquare_x1` 的真机 RL 管线一致。
 
 环境
 -----

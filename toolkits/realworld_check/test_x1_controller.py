@@ -14,14 +14,14 @@
 
 import time
 
-from rlinf.envs.realworld.xsquare.turtle2_smooth_controller import (
-    Turtle2SmoothController,
+from rlinf.envs.realworld.xsquare.x1_smooth_controller import (
+    X1SmoothController,
 )
 
 
 def main():
-    controller = Turtle2SmoothController.launch_controller(freq=50)
-    # controller = Turtle2SmoothController()
+    controller = X1SmoothController.launch_controller(freq=50)
+    # controller = X1SmoothController()
 
     while True:
         try:

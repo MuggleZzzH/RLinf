@@ -21,12 +21,12 @@ video_cfg:
   video_base_dir: ${runner.logger.log_path}/video/eval
 
 init_params:
-  id: "Turtle2DeployEnv-v1"
+  id: "X1DeployEnv-v1"
   num_envs: null
 
 override_cfg:
   is_dummy: false
-  task_description: "Describe your Turtle2 deployment task here."
+  task_description: "Describe your X1 deployment task here."
   use_arm_ids: [0, 1]
   use_camera_ids: [0, 1, 2]
   enforce_gripper_close: false

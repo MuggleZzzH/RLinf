@@ -18,11 +18,11 @@ from dataclasses import dataclass, field
 import gymnasium as gym
 import numpy as np
 
-from rlinf.envs.realworld.xsquare.turtle2_env import Turtle2Env, Turtle2RobotConfig
+from rlinf.envs.realworld.xsquare.x1_env import X1Env, X1RobotConfig
 
 
 @dataclass
-class Turtle2DeployEnvConfig(Turtle2RobotConfig):
+class X1DeployEnvConfig(X1RobotConfig):
     use_camera_ids: list[int] = field(default_factory=lambda: [0, 1, 2])
     use_arm_ids: list[int] = field(default_factory=lambda: [0, 1])
     enforce_gripper_close: bool = False
@@ -47,8 +47,8 @@ class Turtle2DeployEnvConfig(Turtle2RobotConfig):
         self.action_scale = np.asarray(self.action_scale, dtype=np.float64)
 
 
-class Turtle2DeployEnv(Turtle2Env):
-    CONFIG_CLS = Turtle2DeployEnvConfig
+class X1DeployEnv(X1Env):
+    CONFIG_CLS = X1DeployEnvConfig
 
     def __init__(self, override_cfg, worker_info=None, hardware_info=None, env_idx=0):
         config = self.CONFIG_CLS(**override_cfg)
@@ -106,8 +106,8 @@ class Turtle2DeployEnv(Turtle2Env):
         )
         action = action.reshape(-1, 7)
         next_positions = {
-            0: self._turtle2_state.follow1_pos.copy(),
-            1: self._turtle2_state.follow2_pos.copy(),
+            0: self._x1_state.follow1_pos.copy(),
+            1: self._x1_state.follow2_pos.copy(),
         }
         for action_row, arm_id in zip(action, self.config.use_arm_ids, strict=False):
             next_positions[arm_id][:6] = action_row[:6]
@@ -127,15 +127,15 @@ class Turtle2DeployEnv(Turtle2Env):
                 next_position1.tolist(), next_position2.tolist()
             ).wait()
         else:
-            self._turtle2_state.follow1_pos = next_position1.copy()
-            self._turtle2_state.follow2_pos = next_position2.copy()
+            self._x1_state.follow1_pos = next_position1.copy()
+            self._x1_state.follow2_pos = next_position2.copy()
 
         self._num_steps += 1
         step_time = time.time() - start_time
         time.sleep(max(0, (1.0 / self.config.step_frequency) - step_time))
 
         if not self.config.is_dummy:
-            self._turtle2_state = self._controller.get_state().wait()[0]
+            self._x1_state = self._controller.get_state().wait()[0]
         observation = self._get_observation()
         reward = self._calc_step_reward(observation)
         terminated = False

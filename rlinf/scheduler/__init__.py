@@ -22,7 +22,7 @@ from .hardware import (
     DualFrankaHWInfo,
     FrankaHWInfo,
     HardwareInfo,
-    Turtle2HWInfo,
+    X1HWInfo,
 )
 from .manager import WorkerInfo
 from .placement import (
@@ -41,7 +41,7 @@ __all__ = [
     "DOSW1HWInfo",
     "DualFrankaHWInfo",
     "FrankaHWInfo",
-    "Turtle2HWInfo",
+    "X1HWInfo",
     "CollectiveGroupOptions",
     "Cluster",
     "ClusterConfig",

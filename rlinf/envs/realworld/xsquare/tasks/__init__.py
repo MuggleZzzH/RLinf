@@ -27,7 +27,7 @@ from rlinf.envs.realworld.xsquare.tasks.button_env import (
     ButtonEnv as ButtonEnv,
 )
 from rlinf.envs.realworld.xsquare.tasks.deploy_env import (
-    Turtle2DeployEnv as Turtle2DeployEnv,
+    X1DeployEnv as X1DeployEnv,
 )
 
 
@@ -47,14 +47,14 @@ def create_button_env(
     return apply_single_arm_wrappers(env, env_cfg)
 
 
-def create_turtle2_deploy_env(
+def create_x1_deploy_env(
     override_cfg: dict[str, Any],
     worker_info: Any,
     hardware_info: Any,
     env_idx: int,
     env_cfg: Mapping[str, Any],
 ) -> gym.Env:
-    env = Turtle2DeployEnv(
+    env = X1DeployEnv(
         override_cfg=override_cfg,
         worker_info=worker_info,
         hardware_info=hardware_info,
@@ -69,6 +69,6 @@ register(
 )
 
 register(
-    id="Turtle2DeployEnv-v1",
-    entry_point="rlinf.envs.realworld.xsquare.tasks:create_turtle2_deploy_env",
+    id="X1DeployEnv-v1",
+    entry_point="rlinf.envs.realworld.xsquare.tasks:create_x1_deploy_env",
 )
