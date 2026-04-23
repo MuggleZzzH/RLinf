@@ -18,7 +18,7 @@ NO_ROOT=0
 NO_INSTALL_RLINF_CMD="--no-install-project"
 SUPPORTED_TARGETS=("embodied" "agentic" "docs")
 SUPPORTED_MODELS=("openvla" "openvla-oft" "openpi" "gr00t" "dexbotic" "starvla" "lingbotvla" "dreamzero")
-SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan" "xsquare_turtle2" "liberopro" "liberoplus" "roboverse" "embodichain" "d4rl" "dosw1")
+SUPPORTED_ENVS=("behavior" "maniskill_libero" "metaworld" "calvin" "isaaclab" "robocasa" "franka" "frankasim" "robotwin" "habitat" "opensora" "wan" "xsquare_x1" "liberopro" "liberoplus" "roboverse" "embodichain" "d4rl" "dosw1")
 
 #=======================Utility Functions=======================
 
@@ -678,9 +678,9 @@ install_env_only() {
                 install_franka_env
             fi
             ;;
-        xsquare_turtle2)
-            uv sync --extra xsquare_turtle2 --active $NO_INSTALL_RLINF_CMD
-            install_xsquare_turtle2_env
+        xsquare_x1)
+            uv sync --extra xsquare_x1 --active $NO_INSTALL_RLINF_CMD
+            install_xsquare_x1_env
             ;;
         habitat)
             install_common_embodied_deps
@@ -913,7 +913,7 @@ install_franka_env() {
     echo "source $ROS_CATKIN_PATH/devel/setup.bash" >> "$VENV_DIR/bin/activate"
 }
 
-install_xsquare_turtle2_env() {
+install_xsquare_x1_env() {
     uv pip install git+${GITHUB_PREFIX}https://github.com/RLinf/xsquare_turtle_basics.git
 }
 

@@ -127,7 +127,7 @@ franka = [
     "numpy<2",
     "lerobot @ git+https://github.com/huggingface/lerobot.git@0cf864870cf29f4738d3ade893e6fd13fbd7cdb5"
 ]
-xsquare_turtle2 = [
+xsquare_x1 = [
     "pyyaml",
     "rospkg",
     "toppra==0.6.3",
@@ -152,7 +152,7 @@ conflicts = [
       { extra = "agentic-vllm" },
       { extra = "embodied" },
       { extra = "franka" },
-      { extra = "xsquare_turtle2" }
+      { extra = "xsquare_x1" }
     ],
 ]
 override-dependencies = [
