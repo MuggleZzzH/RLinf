@@ -26,8 +26,8 @@ from scipy.spatial.transform import Rotation as R
 
 from rlinf.envs.realworld.xsquare.x1_robot_state import X1RobotState
 from rlinf.scheduler import (
-    X1HWInfo,
     WorkerInfo,
+    X1HWInfo,
 )
 from rlinf.utils.logging import get_logger
 

@@ -23,7 +23,9 @@ from cv_bridge import CvBridge
 # rospack = rospkg.RosPack()
 # package_path = rospack.get_path('x1_controller')
 # sys.path.append(os.path.join(rospack_path, 'x1_controller'))
-from turtle2_basic.turtle2_controller.Turtle2Controller import Turtle2Controller as X1Controller
+from turtle2_basic.turtle2_controller.Turtle2Controller import (
+    Turtle2Controller as X1Controller,
+)
 
 from rlinf.scheduler import Cluster, NodePlacementStrategy, Worker
 from rlinf.utils.logging import get_logger
