@@ -97,11 +97,11 @@ jobs:
           bash requirements/install.sh embodied --model dexbotic --env maniskill_libero
           rm -rf .venv
       
-      - name: Install xsquare_turtle2
+      - name: Install xsquare_x1
         run: |
           pip install uv
           uv cache prune --ci
-          bash requirements/install.sh embodied --env xsquare_turtle2
+          bash requirements/install.sh embodied --env xsquare_x1
           rm -rf .venv
 
       - name: Install d4rl (offline env)

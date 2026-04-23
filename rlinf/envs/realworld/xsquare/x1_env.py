@@ -144,7 +144,7 @@ class X1Env(gym.Env):
 
         assert self.env_idx >= 0, "env_idx must be set for X1Env."
 
-        # Launch Turtle controller
+        # Launch X1 controller
         self._controller = X1SmoothController.launch_controller(
             freq=self.config.smooth_frequency,
             env_idx=self.env_idx,

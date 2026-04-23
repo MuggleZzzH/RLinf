@@ -114,7 +114,7 @@ jobs:
           rm -rf .venv
           uv cache prune
 
-  embodied-cnn-realworld-xsquare-turtle2-dummy-sac-test:
+  embodied-cnn-realworld-xsquare-x1-dummy-sac-test:
     runs-on: embodied
     steps:
       - name: Checkout code
@@ -130,13 +130,13 @@ jobs:
           export LIBERO_PATH=/workspace/dataset/LIBERO
           bash requirements/install.sh embodied --model openvla --env maniskill_libero
 
-      - name: Xsquare-turtle2 SAC dummy test
+      - name: Xsquare-x1 SAC dummy test
         timeout-minutes: 20
         run: |
           unset PYTHONPATH
           export REPO_PATH=$(pwd)
           source .venv/bin/activate
-          bash tests/e2e_tests/embodied/run.sh realworld_xsquare_turtle2_dummy_sac_cnn
+          bash tests/e2e_tests/embodied/run.sh realworld_xsquare_x1_dummy_sac_cnn
 
       - name: Clean up
         run: |
