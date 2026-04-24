@@ -18,6 +18,7 @@ import pytest
 
 from rlinf.envs.realworld.common.wrappers import apply_dual_pose_action_wrappers
 from rlinf.envs.realworld.franka.utils import construct_adjoint_matrix
+from rlinf.models.embodiment.openpi.fold_towel_obs import process_fold_towel_s2s_obs
 
 
 class DummyDualPoseEnv(gym.Env):
@@ -39,6 +40,7 @@ class DummyDualPoseEnv(gym.Env):
             high=np.full((14,), 2.0, dtype=np.float32),
             dtype=np.float32,
         )
+        self.gripper_widths = np.array([0.25, 0.75], dtype=np.float32)
         self.last_mode = None
         self.last_action = None
 
@@ -54,6 +56,9 @@ class DummyDualPoseEnv(gym.Env):
 
     def get_relative_pose_action_space(self):
         return self.action_space
+
+    def get_gripper_widths(self):
+        return self.gripper_widths
 
     def step_absolute_pose(self, action):
         self.last_mode = "absolute_pose"
@@ -90,7 +95,14 @@ def test_dual_pose_builder_absolute_mode_routes_and_converts_euler_obs():
     assert wrapped.action_space.low[0] == -2.0
     assert env.last_mode == "absolute_pose"
     np.testing.assert_array_equal(env.last_action, action)
-    assert obs["state"]["tcp_pose"].shape == (12,)
+    np.testing.assert_allclose(
+        obs["state"]["tcp_pose"],
+        np.array(
+            [1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.25, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.75],
+            dtype=np.float32,
+        ),
+        atol=1e-6,
+    )
     assert reward == 0.0
     assert not terminated
     assert not truncated
@@ -104,7 +116,12 @@ def test_dual_pose_builder_relative_mode_applies_relative_frame_by_default():
     # reset() initialises the adjoint matrices inside DualRelativeFrame.
     reset_obs, _ = wrapped.reset()
     np.testing.assert_allclose(
-        reset_obs["state"]["tcp_pose"], np.zeros((12,), dtype=np.float32), atol=1e-6
+        reset_obs["state"]["tcp_pose"],
+        np.array(
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.75],
+            dtype=np.float32,
+        ),
+        atol=1e-6,
     )
 
     action = np.full((14,), 0.5, dtype=np.float32)
@@ -118,7 +135,9 @@ def test_dual_pose_builder_relative_mode_applies_relative_frame_by_default():
     expected_action[7:13] = construct_adjoint_matrix(reset_pose[7:]) @ action[7:13]
     np.testing.assert_allclose(env.last_action, expected_action)
     assert not np.allclose(env.last_action, action)
-    assert obs["state"]["tcp_pose"].shape == (12,)
+    assert obs["state"]["tcp_pose"].shape == (14,)
+    assert obs["state"]["tcp_pose"][6] == pytest.approx(0.25)
+    assert obs["state"]["tcp_pose"][13] == pytest.approx(0.75)
 
 
 def test_dual_pose_builder_relative_mode_no_relative_frame():
@@ -132,9 +151,42 @@ def test_dual_pose_builder_relative_mode_no_relative_frame():
 
     assert env.last_mode == "relative_pose"
     np.testing.assert_array_equal(env.last_action, action)
-    assert obs["state"]["tcp_pose"].shape == (12,)
+    assert obs["state"]["tcp_pose"].shape == (14,)
 
 
 def test_dual_pose_builder_rejects_unknown_action_mode():
     with pytest.raises(ValueError, match="Unsupported action_mode"):
         apply_dual_pose_action_wrappers(DummyDualPoseEnv(), {"action_mode": "joint"})
+
+
+def test_fold_towel_obs_processor_maps_clean_euler_obs():
+    main_images = np.zeros((2, 128, 128, 3), dtype=np.uint8)
+    extra_view_images = np.stack(
+        [
+            np.ones((2, 128, 128, 3), dtype=np.uint8),
+            np.full((2, 128, 128, 3), 2, dtype=np.uint8),
+        ],
+        axis=1,
+    )
+    states = np.arange(28, dtype=np.float32).reshape(2, 14)
+    task_descriptions = ["fold the towel", "fold the towel"]
+
+    processed = process_fold_towel_s2s_obs(
+        {
+            "main_images": main_images,
+            "extra_view_images": extra_view_images,
+            "states": states,
+            "task_descriptions": task_descriptions,
+        },
+    )
+
+    assert set(processed) == {"images", "state", "prompt"}
+    np.testing.assert_array_equal(
+        processed["images"]["left_wrist_view"], extra_view_images[:, 0]
+    )
+    np.testing.assert_array_equal(processed["images"]["face_view"], main_images)
+    np.testing.assert_array_equal(
+        processed["images"]["right_wrist_view"], extra_view_images[:, 1]
+    )
+    np.testing.assert_array_equal(processed["state"], states)
+    assert processed["prompt"] == task_descriptions

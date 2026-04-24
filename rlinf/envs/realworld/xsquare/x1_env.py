@@ -565,3 +565,12 @@ class X1Env(gym.Env):
         else:
             obs = self._base_observation_space.sample()
             return obs
+
+    def get_gripper_widths(self) -> np.ndarray:
+        """Return gripper widths in the same left/right order as ``tcp_pose``."""
+        gripper_widths = []
+        if 0 in self.config.use_arm_ids:
+            gripper_widths.append(self._x1_state.follow1_pos[6])
+        if 1 in self.config.use_arm_ids:
+            gripper_widths.append(self._x1_state.follow2_pos[6])
+        return np.asarray(gripper_widths, dtype=np.float64)

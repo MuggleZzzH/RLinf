@@ -29,6 +29,7 @@ from openpi.models_pytorch.pi0_pytorch import PI0Pytorch, make_att_2d_masks
 from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
 from rlinf.models.embodiment.modules.explore_noise_net import ExploreNoiseNet
 from rlinf.models.embodiment.modules.value_head import ValueHead
+from rlinf.models.embodiment.openpi.fold_towel_obs import process_fold_towel_s2s_obs
 from rlinf.utils.logging import get_logger
 from rlinf.utils.nested_dict_process import copy_dict_tensor
 
@@ -474,6 +475,9 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         return result
 
     def obs_processor(self, env_obs):
+        if self.config.config_name == "fold_towel_s2s":
+            return process_fold_towel_s2s_obs(env_obs)
+
         # base observation
         processed_obs = {
             "observation/image": env_obs["main_images"],
