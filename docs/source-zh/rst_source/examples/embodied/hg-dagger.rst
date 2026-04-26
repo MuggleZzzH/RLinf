@@ -328,6 +328,9 @@ X1 叠毛巾在线 DAgger 使用
 - 默认 ``only_success=True``、``only_intervened=False``，即成功 episode 会作为
   raw artifact 落盘；是否发生人工接管只作为 ``intervened`` metadata 记录，不作为
   默认保存门槛。
+- raw artifact 默认以 ``lerobot`` 格式写入
+  ``${runner.logger.log_path}/x1_dagger_rollouts``，当前配置下即
+  ``../results/x1_dagger_rollouts``。
 - raw 记录包含 policy 段、takeover 段和恢复推理段，并记录机器人实际执行动作。
 - 训练 replay 仍使用 RLinf 原版 ``extract_intervene_traj(mode="all")``，只抽完整
   expert chunk；v1 不做 partial chunk masked loss，也不把 ``all`` 改成 ``any``。

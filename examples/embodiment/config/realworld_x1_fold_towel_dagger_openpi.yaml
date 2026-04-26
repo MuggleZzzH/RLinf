@@ -107,7 +107,7 @@ env:
     data_collection:
       enabled: True
       save_dir: ${runner.logger.log_path}/x1_dagger_rollouts
-      export_format: "pickle"
+      export_format: "lerobot"
       only_success: True
       only_intervened: False
       robot_type: "x1"

@@ -448,19 +448,9 @@ class Trajectory:
             return tensor[:, i][mask[:, i]].unsqueeze(1) if tensor is not None else None
 
         def apply_mask_to_dict(d, i):
-            if not d:
-                return {}
-            ret = {}
-            for k, v in d.items():
-                if isinstance(v, torch.Tensor):
-                    ret[k] = v[:, i][mask[:, i]].unsqueeze(1)
-                elif isinstance(v, dict):
-                    nested = apply_mask_to_dict(v, i)
-                    if nested:
-                        ret[k] = nested
-                else:
-                    raise ValueError(f"{k=}, {type(v)} is not supported.")
-            return ret
+            return (
+                {k: v[:, i][mask[:, i]].unsqueeze(1) for k, v in d.items()} if d else {}
+            )
 
         filtered_trajectories = []
         for i in range(mask.shape[1]):
@@ -666,18 +656,20 @@ class EmbodiedRolloutResult:
         if len(self.versions) > 0:
             trajectory.versions = torch.stack(self.versions, dim=0).cpu().contiguous()
         if len(self.forward_inputs) > 0:
-            trajectory.forward_inputs = put_tensor_device(
-                stack_list_of_dict_tensor(self.forward_inputs), "cpu"
-            )
+            trajectory.forward_inputs = stack_list_of_dict_tensor(self.forward_inputs)
+            for key in trajectory.forward_inputs.keys():
+                trajectory.forward_inputs[key] = (
+                    trajectory.forward_inputs[key].cpu().contiguous()
+                )
 
         if len(self.curr_obs) > 0:
-            trajectory.curr_obs = put_tensor_device(
-                stack_list_of_dict_tensor(self.curr_obs), "cpu"
-            )
+            trajectory.curr_obs = stack_list_of_dict_tensor(self.curr_obs)
+            for key in trajectory.curr_obs.keys():
+                trajectory.curr_obs[key] = trajectory.curr_obs[key].cpu().contiguous()
         if len(self.next_obs) > 0:
-            trajectory.next_obs = put_tensor_device(
-                stack_list_of_dict_tensor(self.next_obs), "cpu"
-            )
+            trajectory.next_obs = stack_list_of_dict_tensor(self.next_obs)
+            for key in trajectory.next_obs.keys():
+                trajectory.next_obs[key] = trajectory.next_obs[key].cpu().contiguous()
 
         trajectory.model_weights_id = get_model_weights_id(
             trajectory.versions
@@ -751,20 +743,42 @@ def convert_trajectories_to_batch(
 
     # -------- obs / forward_inputs: dict[str, Tensor] --------
     if trajectories[0].curr_obs:
-        batch["curr_obs"] = _cat_nested_trajectory_dicts(
-            [traj.curr_obs for traj in trajectories if traj.curr_obs], dim=1
-        )
+        all_keys: set[str] = set()
+        for traj in trajectories:
+            all_keys.update(traj.curr_obs.keys())
+        batch["curr_obs"] = {}
+        for key in all_keys:
+            tensors = [
+                traj.curr_obs[key] for traj in trajectories if key in traj.curr_obs
+            ]
+            if tensors:
+                batch["curr_obs"][key] = torch.cat(tensors, dim=1)
 
     if trajectories[0].next_obs:
-        batch["next_obs"] = _cat_nested_trajectory_dicts(
-            [traj.next_obs for traj in trajectories if traj.next_obs], dim=1
-        )
+        all_keys: set[str] = set()
+        for traj in trajectories:
+            all_keys.update(traj.next_obs.keys())
+        batch["next_obs"] = {}
+        for key in all_keys:
+            tensors = [
+                traj.next_obs[key] for traj in trajectories if key in traj.next_obs
+            ]
+            if tensors:
+                batch["next_obs"][key] = torch.cat(tensors, dim=1)
 
     if trajectories[0].forward_inputs:
-        batch["forward_inputs"] = _cat_nested_trajectory_dicts(
-            [traj.forward_inputs for traj in trajectories if traj.forward_inputs],
-            dim=1,
-        )
+        all_keys: set[str] = set()
+        for traj in trajectories:
+            all_keys.update(traj.forward_inputs.keys())
+        batch["forward_inputs"] = {}
+        for key in all_keys:
+            tensors = [
+                traj.forward_inputs[key]
+                for traj in trajectories
+                if key in traj.forward_inputs
+            ]
+            if tensors:
+                batch["forward_inputs"][key] = torch.cat(tensors, dim=1)
 
     # -------- tensor fields --------
     reference_trajectory = trajectories[0]
@@ -780,30 +794,3 @@ def convert_trajectories_to_batch(
             batch[field_name] = torch.cat(field_list, dim=1)
 
     return batch
-
-
-def _cat_nested_trajectory_dicts(dicts: list[dict], dim: int) -> dict:
-    if not dicts:
-        return {}
-    ret: dict[str, Any] = {}
-    all_keys: set[str] = set()
-    for d in dicts:
-        all_keys.update(d.keys())
-
-    for key in all_keys:
-        values = [d[key] for d in dicts if key in d]
-        if not values:
-            continue
-        first_value = values[0]
-        if isinstance(first_value, torch.Tensor):
-            tensors = [value for value in values if isinstance(value, torch.Tensor)]
-            if tensors:
-                ret[key] = torch.cat(tensors, dim=dim)
-        elif isinstance(first_value, dict):
-            nested_values = [value for value in values if isinstance(value, dict)]
-            nested = _cat_nested_trajectory_dicts(nested_values, dim=dim)
-            if nested:
-                ret[key] = nested
-        else:
-            raise ValueError(f"{key=}, {type(first_value)} is not supported.")
-    return ret

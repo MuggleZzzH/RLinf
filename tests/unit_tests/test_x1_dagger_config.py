@@ -43,6 +43,8 @@ def test_x1_fold_towel_dagger_config_composes(monkeypatch):
     assert cfg.actor.model.num_action_chunks == 30
     assert cfg.env.train.use_master_takeover is True
     assert cfg.env.train.master_takeover.port == 8766
+    assert cfg.env.train.data_collection.save_dir == "../results/x1_dagger_rollouts"
+    assert cfg.env.train.data_collection.export_format == "lerobot"
     assert cfg.env.train.data_collection.only_success is True
     assert cfg.env.train.data_collection.only_intervened is False
     assert cfg.env.eval.use_master_takeover is False
