@@ -50,6 +50,33 @@ def test_x1_fold_towel_dagger_config_composes(monkeypatch):
     assert cfg.env.eval.use_master_takeover is False
 
 
+def test_x1_fold_towel_takeover_collect_config_composes(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[2]
+    config_dir = repo_root / "examples" / "embodiment" / "config"
+    monkeypatch.setenv("EMBODIED_PATH", str(repo_root / "examples" / "embodiment"))
+
+    GlobalHydra.instance().clear()
+    try:
+        with initialize_config_dir(config_dir=str(config_dir), version_base="1.1"):
+            cfg = compose(config_name="realworld_x1_fold_towel_takeover_collect_openpi")
+    finally:
+        GlobalHydra.instance().clear()
+
+    assert cfg.runner.only_eval is True
+    assert cfg.rollout.collect_transitions is False
+    assert cfg.env.eval.use_master_takeover is True
+    assert cfg.env.eval.action_mode == "absolute_pose"
+    assert cfg.env.eval.master_takeover.port == 8766
+    assert cfg.env.eval.keyboard_reward_wrapper == "single_stage"
+    assert cfg.env.eval.data_collection.enabled is True
+    assert cfg.env.eval.data_collection.export_format == "lerobot"
+    assert cfg.env.eval.data_collection.only_success is True
+    assert cfg.env.eval.data_collection.only_intervened is False
+    assert cfg.actor.model.openpi.config_name == "fold_towel_s2s"
+    assert cfg.actor.model.action_dim == 14
+    assert cfg.actor.model.num_action_chunks == 30
+
+
 def test_x1_deploy_config_rejects_single_arm_use_arm_ids():
     sys.modules.setdefault("cv2", types.ModuleType("cv2"))
     from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnvConfig
