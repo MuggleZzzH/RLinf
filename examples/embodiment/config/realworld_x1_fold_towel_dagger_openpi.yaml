@@ -1,0 +1,231 @@
+defaults:
+  - env/realworld_x1_deploy@env.train
+  - env/realworld_x1_deploy@env.eval
+  - model/pi0@actor.model
+  - training_backend/fsdp@actor.fsdp_config
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+cluster:
+  num_nodes: 2
+  component_placement:
+    actor:
+      node_group: "4090"
+      placement: 0-0
+    rollout:
+      node_group: "4090"
+      placement: 0-0
+    env:
+      node_group: x1
+      placement: 0
+  node_groups:
+    - label: "4090"
+      node_ranks: 0-0
+      env_configs:
+        - node_ranks: 0-0
+    - label: x1
+      node_ranks: 1-1
+      hardware:
+        type: X1
+        configs:
+          - node_rank: 1
+
+runner:
+  task_type: embodied
+  logger:
+    log_path: "../results"
+    project_name: rlinf
+    experiment_name: "x1-fold-towel-dagger-openpi"
+    logger_backends: ["tensorboard"]
+  max_epochs: 8000
+  max_steps: -1
+  only_eval: False
+  val_check_interval: -1
+  save_interval: -1
+  resume_dir: null
+  ckpt_path: null
+
+algorithm:
+  dagger:
+    init_beta: 1.0
+    beta_schedule: "exponential"
+    beta_decay: 0.99
+    only_save_expert: True
+
+  rollout_epoch: 1
+  eval_rollout_epoch: 1
+  gamma: 0.99
+
+  update_epoch: 1
+  adv_type: gae
+  loss_type: embodied_dagger
+
+  sampling_params:
+    do_sample: True
+    temperature_train: 1.0
+    temperature_eval: 0.6
+    top_k: 50
+    top_p: 1.0
+    repetition_penalty: 1.0
+    add_BOS: False
+
+  length_params:
+    max_new_token: 14
+    max_length: 1024
+    min_length: 1
+
+  replay_buffer:
+    enable_cache: True
+    cache_size: 200
+    min_buffer_size: 4
+    sample_window_size: 200
+    auto_save: False
+
+env:
+  group_name: "EnvGroup"
+  enable_offload: False
+
+  train:
+    auto_reset: False
+    ignore_terminations: False
+    total_num_envs: 1
+    no_gripper: False
+    use_spacemouse: False
+    use_gello: False
+    use_master_takeover: True
+    action_mode: absolute_pose
+    keyboard_reward_wrapper: single_stage
+    main_image_key: wrist_2
+    max_steps_per_rollout_epoch: 300
+    max_episode_steps: 300
+    data_collection:
+      enabled: True
+      save_dir: ${runner.logger.log_path}/x1_dagger_rollouts
+      export_format: "pickle"
+      only_success: True
+      only_intervened: False
+      robot_type: "x1"
+      fps: 10
+      finalize_interval: 100
+    master_takeover:
+      host: "0.0.0.0"
+      port: 8766
+      running_mode_source: "ros_param"
+      running_mode_param: "/running_mode"
+      normal_mode_value: 1
+      takeover_mode_value: 2
+      takeover_delay_s: 4.0
+      socket_timeout_s: 0.1
+      accept_timeout_s: 0.1
+      reconnect_sleep_s: 0.1
+    override_cfg:
+      task_description: "fold the towel"
+      use_arm_ids: [0, 1]
+      use_camera_ids: [0, 1, 2]
+      enforce_gripper_close: false
+      reset_ee_pose:
+        - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]
+        - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]
+      max_num_steps: 300
+      ee_pose_limit_min:
+        - [-0.20, -0.60, -0.05, -3.20, -3.20, -3.20]
+        - [-0.20, -0.60, -0.05, -3.20, -3.20, -3.20]
+      ee_pose_limit_max:
+        - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
+        - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
+
+  eval:
+    total_num_envs: 1
+    auto_reset: True
+    ignore_terminations: False
+    no_gripper: False
+    use_spacemouse: False
+    use_gello: False
+    use_master_takeover: False
+    action_mode: absolute_pose
+    main_image_key: wrist_2
+    max_steps_per_rollout_epoch: 300
+    max_episode_steps: 300
+    override_cfg:
+      task_description: "fold the towel"
+      use_arm_ids: [0, 1]
+      use_camera_ids: [0, 1, 2]
+      enforce_gripper_close: false
+      reset_ee_pose:
+        - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]
+        - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]
+      max_num_steps: 300
+      ee_pose_limit_min:
+        - [-0.20, -0.60, -0.05, -3.20, -3.20, -3.20]
+        - [-0.20, -0.60, -0.05, -3.20, -3.20, -3.20]
+      ee_pose_limit_max:
+        - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
+        - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
+
+rollout:
+  group_name: "RolloutGroup"
+  backend: "huggingface"
+  recompute_logprobs: False
+  enable_offload: False
+  pipeline_stage_num: 1
+  collect_transitions: True
+  collect_prev_infos: False
+  sync_weight_nccl_max_ctas: 32
+  model:
+    model_path: /home/user/zjh_projects/checkpoints/fold_towel_pytorch
+    precision: ${actor.model.precision}
+
+actor:
+  group_name: "ActorGroup"
+  training_backend: "fsdp"
+  micro_batch_size: 1
+  global_batch_size: 1
+  seed: 1234
+  enable_offload: True
+
+  model:
+    precision: null
+    model_path: ${rollout.model.model_path}
+    num_action_chunks: 30
+    action_dim: 14
+    add_value_head: False
+    openpi:
+      config_name: "fold_towel_s2s"
+      num_images_in_input: 3
+      train_expert_only: False
+      detach_critic_input: False
+      action_chunk: ${actor.model.num_action_chunks}
+      action_env_dim: ${actor.model.action_dim}
+
+  optim:
+    lr: 1.0e-5
+    value_lr: 1.0e-4
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1.0e-08
+    weight_decay: 1.0e-10
+    clip_grad: 4.0
+    warmup_style: "cosine"
+    lr_warmup_steps: 20
+    total_training_steps: 1000
+
+  fsdp_config:
+    strategy: "fsdp"
+    sharding_strategy: "no_shard"
+    gradient_checkpointing: False
+    mixed_precision:
+      param_dtype: ${actor.model.precision}
+      reduce_dtype: ${actor.model.precision}
+      buffer_dtype: ${actor.model.precision}
+
+reward:
+  use_reward_model: False
+
+critic:
+  use_critic_model: False

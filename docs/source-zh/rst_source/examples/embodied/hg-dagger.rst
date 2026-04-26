@@ -295,6 +295,45 @@ SFT 导出的 checkpoint 会作为在线阶段的学生模型初始化。更多 
 
    bash examples/embodiment/run_realworld_async.sh realworld_pnp_dagger_openpi
 
+X1 Fold-Towel DAgger
+--------------------
+
+X1 叠毛巾在线 DAgger 使用
+``examples/embodiment/config/realworld_x1_fold_towel_dagger_openpi.yaml``。该配置
+沿用 RLinf 官方 ``embodied_dagger`` 训练链路，不复用旧 x2robot 录包脚本作为
+训练逻辑。
+
+**数据合同**
+
+- 仅支持 ``fold_towel_s2s``：三视角、双臂、14D Euler+gripper、
+  ``num_action_chunks=30``。
+- Master 直接连接 X1 / Ray worker 上的 RLinf takeover TCP server，默认端口
+  ``8766``。
+- RLinf DAgger 模式下不要启动旧 ``bi_teleop_slave.py`` 或
+  ``socket2ros_async_test.py`` 作为机器人执行器，避免双执行器同时发控制命令。
+
+**运行时语义**
+
+- ``running_mode=1``：policy 推理控制。
+- ``running_mode=2``：master takeover 控制，wrapper 将 master 的 14D absolute
+  pose 写为实际动作，并写入 ``intervene_action`` / ``intervene_flag``。
+- 接管结束切回 ``running_mode=1`` 后，v1 在当前 action chunk 剩余步保持当前
+  pose，到下一个 chunk 边界再用当前观测重新推理，避免执行接管前生成的 stale
+  policy action。
+
+**记录与训练**
+
+- ``env.train.data_collection.enabled=True`` 会从 rollout / env reset 开始记录整条
+  episode，而不是从第一次接管开始记录。
+- 默认 ``only_success=True``、``only_intervened=False``，即成功 episode 会作为
+  raw artifact 落盘；是否发生人工接管只作为 ``intervened`` metadata 记录，不作为
+  默认保存门槛。
+- raw 记录包含 policy 段、takeover 段和恢复推理段，并记录机器人实际执行动作。
+- 训练 replay 仍使用 RLinf 原版 ``extract_intervene_traj(mode="all")``，只抽完整
+  expert chunk；v1 不做 partial chunk masked loss，也不把 ``all`` 改成 ``any``。
+- ``env.train.auto_reset=False`` 时，episode 结束和 reset 由人工 keyboard done /
+  现场流程控制。
+
 可视化与监控
 ------------
 

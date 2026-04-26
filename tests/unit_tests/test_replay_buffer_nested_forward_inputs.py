@@ -113,3 +113,24 @@ def test_convert_trajectories_to_batch_preserves_nested_forward_inputs():
         3,
     )
     assert batch["forward_inputs"]["state"].shape == (1, 2, 14)
+
+
+def test_extract_intervene_traj_all_drops_partial_chunk():
+    rollout = EmbodiedRolloutResult(max_episode_length=1)
+    rollout.actions.append(torch.zeros(1, 420))
+    flags = torch.zeros(1, 420, dtype=torch.bool)
+    flags[:, :14] = True
+    rollout.intervene_flags.append(flags)
+    rollout.rewards.append(torch.zeros(1))
+    rollout.forward_inputs.append(
+        {
+            "images": {
+                "left_wrist_view": torch.ones(1, 4, 4, 3),
+            },
+            "state": torch.arange(14, dtype=torch.float32).reshape(1, 14),
+        }
+    )
+    trajectory = rollout.to_trajectory()
+
+    assert trajectory.extract_intervene_traj(mode="all") is None
+    assert trajectory.extract_intervene_traj(mode="any") is not None

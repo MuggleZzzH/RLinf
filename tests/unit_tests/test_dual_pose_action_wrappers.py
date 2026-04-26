@@ -60,6 +60,12 @@ class DummyDualPoseEnv(gym.Env):
     def get_gripper_widths(self):
         return self.gripper_widths
 
+    def get_joint_snapshot(self):
+        return np.zeros((2, 7), dtype=np.float32)
+
+    def get_arm_pose_snapshot(self):
+        return np.zeros((2, 7), dtype=np.float32)
+
     def step_absolute_pose(self, action):
         self.last_mode = "absolute_pose"
         self.last_action = np.asarray(action)
@@ -157,6 +163,14 @@ def test_dual_pose_builder_relative_mode_no_relative_frame():
 def test_dual_pose_builder_rejects_unknown_action_mode():
     with pytest.raises(ValueError, match="Unsupported action_mode"):
         apply_dual_pose_action_wrappers(DummyDualPoseEnv(), {"action_mode": "joint"})
+
+
+def test_dual_pose_builder_rejects_relative_master_takeover():
+    with pytest.raises(ValueError, match="requires action_mode='absolute_pose'"):
+        apply_dual_pose_action_wrappers(
+            DummyDualPoseEnv(),
+            {"action_mode": "relative_pose", "use_master_takeover": True},
+        )
 
 
 def test_fold_towel_obs_processor_maps_clean_euler_obs():

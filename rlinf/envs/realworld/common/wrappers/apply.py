@@ -41,6 +41,9 @@ from rlinf.envs.realworld.common.wrappers.gello_intervention import (
     GelloIntervention,
 )
 from rlinf.envs.realworld.common.wrappers.gripper_close import GripperCloseEnv
+from rlinf.envs.realworld.common.wrappers.master_takeover_intervention import (
+    MasterTakeoverIntervention,
+)
 from rlinf.envs.realworld.common.wrappers.relative_frame import RelativeFrame
 from rlinf.envs.realworld.common.wrappers.reward_done_wrapper import (
     KeyboardRewardDoneMultiStageWrapper,
@@ -155,6 +158,14 @@ def apply_dual_pose_action_wrappers(env: gym.Env, cfg: Mapping[str, Any]) -> gym
     SpaceMouse; those have no meaning in a deploy-only env.
     """
     action_mode = cfg.get("action_mode", "absolute_pose")
+    use_master_takeover = cfg.get("use_master_takeover", False)
+    if use_master_takeover and action_mode != "absolute_pose":
+        raise ValueError(
+            "use_master_takeover=True requires action_mode='absolute_pose'. "
+            "Master takeover poses are absolute dual-arm 14D commands and cannot "
+            "be interpreted as relative_pose actions."
+        )
+
     if action_mode == "absolute_pose":
         env = DualAbsolutePoseActionWrapper(env)
     elif action_mode == "relative_pose":
@@ -166,6 +177,9 @@ def apply_dual_pose_action_wrappers(env: gym.Env, cfg: Mapping[str, Any]) -> gym
             f"Unsupported action_mode={action_mode!r}. "
             "Expected one of {'absolute_pose', 'relative_pose'}."
         )
+
+    if use_master_takeover:
+        env = MasterTakeoverIntervention(env, config=cfg.get("master_takeover", None))
 
     env = _apply_keyboard_reward(env, cfg.get("keyboard_reward_wrapper", None))
     env = DualQuat2EulerWrapper(env)
