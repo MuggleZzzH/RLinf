@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import importlib
 import os
 import pathlib
 import time
@@ -29,6 +30,18 @@ from omegaconf import OmegaConf
 from rlinf.envs.realworld.venv import NoAutoResetSyncVectorEnv
 from rlinf.envs.utils import to_tensor
 from rlinf.scheduler import WorkerInfo
+
+_REALWORLD_TASK_MODULES = {
+    "ButtonEnv-v1": "rlinf.envs.realworld.xsquare.tasks",
+    "X1DeployEnv-v1": "rlinf.envs.realworld.xsquare.tasks",
+    "FrankaEnv-v1": "rlinf.envs.realworld.franka.tasks",
+    "DualFrankaEnv-v1": "rlinf.envs.realworld.franka.tasks",
+    "PegInsertionEnv-v1": "rlinf.envs.realworld.franka.tasks",
+    "FrankaBinRelocationEnv-v1": "rlinf.envs.realworld.franka.tasks",
+    "BottleEnv-v1": "rlinf.envs.realworld.franka.tasks",
+    "DOSW1PickEnv-v1": "rlinf.envs.realworld.dosw1.tasks",
+}
+_REALWORLD_SETUP_DONE = False
 
 
 class RealWorldEnv(gym.Env):
@@ -58,6 +71,7 @@ class RealWorldEnv(gym.Env):
             self.override_cfg.get("manual_episode_control_only", False)
         )
 
+        self._ensure_realworld_setup()
         self._init_env()
 
         self._is_start = True
@@ -71,6 +85,7 @@ class RealWorldEnv(gym.Env):
         if worker_info is not None and env_idx < len(worker_info.hardware_infos):
             hardware_info = worker_info.hardware_infos[env_idx]
         override_cfg = copy.deepcopy(self.override_cfg)
+        self._ensure_task_registered(self.cfg.init_params.id)
         env = gym.make(
             id=self.cfg.init_params.id,
             override_cfg=override_cfg,
@@ -81,15 +96,34 @@ class RealWorldEnv(gym.Env):
         )
         return env
 
+    @classmethod
+    def _ensure_realworld_setup(cls):
+        global _REALWORLD_SETUP_DONE
+        if _REALWORLD_SETUP_DONE:
+            return
+        cls.realworld_setup()
+        _REALWORLD_SETUP_DONE = True
+
+    @staticmethod
+    def _ensure_task_registered(env_id: str):
+        module_name = _REALWORLD_TASK_MODULES.get(env_id)
+        if module_name is None:
+            supported = ", ".join(sorted(_REALWORLD_TASK_MODULES))
+            raise ValueError(
+                f"Unknown realworld env id {env_id!r}. Supported ids: {supported}."
+            )
+        importlib.import_module(module_name)
+
     @staticmethod
     def realworld_setup():
-        """Setup RealWorld environment upon env class import.
+        """Setup RealWorld environment upon first RealWorldEnv construction.
 
         This is for any node-level setup required by RealWorld environments. For example, ROS
         requires a single roscore instance per node, so we ensure that any existing roscore
         processes are terminated before starting a new one.
 
-        This function is called once when the RealWorldEnv class is first imported.
+        This function is called once per process before creating the first realworld
+        environment instance.
         """
         # Concurrency control is needed for multiple processes on the same node
         node_lock_file = "/tmp/.realworld.lock"

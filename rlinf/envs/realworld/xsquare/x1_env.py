@@ -574,3 +574,15 @@ class X1Env(gym.Env):
         if 1 in self.config.use_arm_ids:
             gripper_widths.append(self._x1_state.follow2_pos[6])
         return np.asarray(gripper_widths, dtype=np.float64)
+
+    def get_joint_snapshot(self) -> np.ndarray:
+        """Return current dual-arm joint positions for teleop takeover wrappers."""
+        return np.stack(
+            [self._x1_state.follow1_joints, self._x1_state.follow2_joints]
+        ).astype(np.float32, copy=True)
+
+    def get_arm_pose_snapshot(self) -> np.ndarray:
+        """Return current dual-arm Euler poses for teleop takeover wrappers."""
+        return np.stack(
+            [self._x1_state.follow1_pos, self._x1_state.follow2_pos]
+        ).astype(np.float32, copy=True)

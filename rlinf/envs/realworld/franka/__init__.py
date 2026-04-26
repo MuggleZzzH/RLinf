@@ -12,7 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from importlib import import_module
+from typing import Any
 
-from .franka_env import FrankaEnv, FrankaRobotConfig, FrankaRobotState
+_LAZY_ATTRS = {
+    "FrankaEnv": ("rlinf.envs.realworld.franka.franka_env", "FrankaEnv"),
+    "FrankaRobotConfig": (
+        "rlinf.envs.realworld.franka.franka_env",
+        "FrankaRobotConfig",
+    ),
+    "FrankaRobotState": (
+        "rlinf.envs.realworld.franka.franka_robot_state",
+        "FrankaRobotState",
+    ),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _LAZY_ATTRS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = _LAZY_ATTRS[name]
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value
 
 __all__ = ["FrankaEnv", "FrankaRobotState", "FrankaRobotConfig"]

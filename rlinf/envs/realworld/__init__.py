@@ -12,16 +12,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .dosw1 import DOSW1Config, DOSW1Env
-from .dosw1 import tasks as dosw1_tasks
-from .franka import FrankaEnv, FrankaRobotConfig, FrankaRobotState
-from .franka import tasks as franka_tasks
-from .franka.dual_franka_env import DualFrankaEnv, DualFrankaRobotConfig
-from .realworld_env import RealWorldEnv
-from .xsquare import X1Env, X1RobotConfig, X1RobotState
-from .xsquare import tasks as xsquare_tasks
+from importlib import import_module
+from typing import Any
 
-RealWorldEnv.realworld_setup()
+from .realworld_env import RealWorldEnv
+
+_LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
+    "DualFrankaEnv": ("rlinf.envs.realworld.franka.dual_franka_env", "DualFrankaEnv"),
+    "DualFrankaRobotConfig": (
+        "rlinf.envs.realworld.franka.dual_franka_env",
+        "DualFrankaRobotConfig",
+    ),
+    "DOSW1Config": ("rlinf.envs.realworld.dosw1", "DOSW1Config"),
+    "DOSW1Env": ("rlinf.envs.realworld.dosw1", "DOSW1Env"),
+    "dosw1_tasks": ("rlinf.envs.realworld.dosw1.tasks", None),
+    "FrankaEnv": ("rlinf.envs.realworld.franka", "FrankaEnv"),
+    "FrankaRobotConfig": ("rlinf.envs.realworld.franka", "FrankaRobotConfig"),
+    "FrankaRobotState": ("rlinf.envs.realworld.franka", "FrankaRobotState"),
+    "franka_tasks": ("rlinf.envs.realworld.franka.tasks", None),
+    "X1Env": ("rlinf.envs.realworld.xsquare", "X1Env"),
+    "X1RobotConfig": ("rlinf.envs.realworld.xsquare", "X1RobotConfig"),
+    "X1RobotState": ("rlinf.envs.realworld.xsquare", "X1RobotState"),
+    "xsquare_tasks": ("rlinf.envs.realworld.xsquare.tasks", None),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _LAZY_ATTRS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = _LAZY_ATTRS[name]
+    module = import_module(module_name)
+    value = module if attr_name is None else getattr(module, attr_name)
+    globals()[name] = value
+    return value
 
 __all__ = [
     "DualFrankaEnv",

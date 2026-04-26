@@ -12,6 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from rlinf.envs.realworld.dosw1.dosw1_env import ControlMode, DOSW1Config, DOSW1Env
+from importlib import import_module
+from typing import Any
+
+_LAZY_ATTRS = {
+    "ControlMode": ("rlinf.envs.realworld.dosw1.dosw1_env", "ControlMode"),
+    "DOSW1Config": ("rlinf.envs.realworld.dosw1.dosw1_env", "DOSW1Config"),
+    "DOSW1Env": ("rlinf.envs.realworld.dosw1.dosw1_env", "DOSW1Env"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _LAZY_ATTRS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = _LAZY_ATTRS[name]
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value
 
 __all__ = ["ControlMode", "DOSW1Config", "DOSW1Env"]

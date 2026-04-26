@@ -12,7 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from importlib import import_module
+from typing import Any
 
-from .x1_env import X1Env, X1RobotConfig, X1RobotState
+_LAZY_ATTRS = {
+    "X1Env": ("rlinf.envs.realworld.xsquare.x1_env", "X1Env"),
+    "X1RobotConfig": ("rlinf.envs.realworld.xsquare.x1_env", "X1RobotConfig"),
+    "X1RobotState": (
+        "rlinf.envs.realworld.xsquare.x1_robot_state",
+        "X1RobotState",
+    ),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _LAZY_ATTRS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = _LAZY_ATTRS[name]
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value
 
 __all__ = ["X1Env", "X1RobotState", "X1RobotConfig"]

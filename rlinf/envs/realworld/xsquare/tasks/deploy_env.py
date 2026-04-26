@@ -29,6 +29,12 @@ class X1DeployEnvConfig(X1RobotConfig):
     task_description: str = ""
 
     def __post_init__(self):
+        self.use_arm_ids = list(self.use_arm_ids)
+        if self.use_arm_ids != [0, 1]:
+            raise ValueError(
+                "X1DeployEnv currently supports only dual-arm s2s deployment with "
+                "use_arm_ids=[0, 1]."
+            )
         self.target_ee_pose = np.asarray(self.target_ee_pose, dtype=np.float64).reshape(
             2, 6
         )
