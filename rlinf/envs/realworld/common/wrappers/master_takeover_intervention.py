@@ -73,7 +73,7 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
         self._chunk_active = False
         self._hold_until_chunk_end = False
 
-    def action(self, action: np.ndarray) -> tuple[np.ndarray, bool, bool]:
+    def action(self, action: np.ndarray) -> tuple[np.ndarray, bool, bool, bool]:
         self.adapter.poll()
         takeover_active = self.adapter.is_takeover_active()
         if self._chunk_active and self._was_takeover_active and not takeover_active:
@@ -82,22 +82,26 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
 
         expert_action = self.adapter.get_takeover_action()
         if expert_action is not None:
-            return expert_action.astype(np.float32, copy=False), True, False
+            return expert_action.astype(np.float32, copy=False), True, False, False
+
+        if takeover_active:
+            return self._hold_action(), False, False, True
 
         if self._hold_until_chunk_end:
-            return self._hold_action(), False, True
+            return self._hold_action(), False, True, False
 
-        return action, False, False
+        return action, False, False, False
 
     def step(self, action):
-        new_action, replaced, holding = self.action(action)
+        new_action, replaced, chunk_holding, sync_holding = self.action(action)
         obs, rew, done, truncated, info = self.env.step(new_action)
         info["executed_action"] = new_action
         info["intervene_flag"] = np.asarray([replaced], dtype=bool)
         if replaced:
             info["intervene_action"] = new_action
         info["takeover_active"] = self.adapter.is_takeover_active()
-        info["takeover_chunk_hold"] = holding
+        info["takeover_chunk_hold"] = chunk_holding
+        info["takeover_sync_hold"] = sync_holding
         info["master_takeover_connected"] = self.adapter.is_connected()
         return obs, rew, done, truncated, info
 

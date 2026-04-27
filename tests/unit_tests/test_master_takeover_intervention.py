@@ -94,7 +94,7 @@ def test_master_takeover_mode_1_passes_policy_action():
     assert "intervene_action" not in info
 
 
-def test_master_takeover_mode_2_without_fresh_pose_passes_policy_action():
+def test_master_takeover_mode_2_without_fresh_pose_holds_current_pose():
     env = DummyTakeoverEnv()
     adapter = FakeTakeoverAdapter(states=[(True, None)])
     wrapped = MasterTakeoverIntervention(env, adapter=adapter)
@@ -102,8 +102,12 @@ def test_master_takeover_mode_2_without_fresh_pose_passes_policy_action():
     action = np.ones(14, dtype=np.float32)
     _, _, _, _, info = wrapped.step(action)
 
-    np.testing.assert_array_equal(env.last_action, action)
+    expected_hold = env.pose_snapshot.reshape(-1)
+    np.testing.assert_array_equal(env.last_action, expected_hold)
+    np.testing.assert_array_equal(info["executed_action"], expected_hold)
     assert info["takeover_active"]
+    assert info["takeover_sync_hold"]
+    assert not info["takeover_chunk_hold"]
     assert not info["intervene_flag"].item()
     assert "intervene_action" not in info
 
@@ -142,6 +146,7 @@ def test_master_takeover_holds_after_takeover_until_chunk_boundary():
     expected_hold = env.pose_snapshot.reshape(-1)
     np.testing.assert_array_equal(env.last_action, expected_hold)
     assert hold_info["takeover_chunk_hold"]
+    assert not hold_info["takeover_sync_hold"]
     assert not hold_info["intervene_flag"].item()
 
     wrapped.end_action_chunk()
