@@ -266,6 +266,8 @@ class X2RobotTakeoverTCPServer:
                 self._follow_start_time = None
                 self._min_pose_timestamp_us = 0
                 self._snapshot_dirty = running_mode == self.config.takeover_mode_value
+
+    def sync_control_plane(self) -> None:
         self._sync_control_plane()
 
     def is_connected(self) -> bool:
@@ -386,7 +388,7 @@ class X2RobotTakeoverTCPServer:
             mode_dirty = self._mode_dirty
             snapshot_dirty = self._snapshot_dirty
 
-        if mode_dirty:
+        def send_mode() -> bool:
             try:
                 send_frame(
                     client_socket,
@@ -398,45 +400,66 @@ class X2RobotTakeoverTCPServer:
             except (OSError, ValueError) as exc:
                 self._logger.warning("Failed to send takeover mode: %s", exc)
                 self._drop_client_connection()
+                return False
+            return True
+
+        def send_joint_snapshot() -> bool:
+            joint_snapshot = np.asarray(self._joint_snapshot_getter(), dtype=np.float32)
+            if joint_snapshot.shape != (2, 7):
+                self._logger.warning(
+                    "Skip takeover joint snapshot: expected shape (2, 7), got %s",
+                    joint_snapshot.shape,
+                )
+                return False
+
+            try:
+                send_frame(
+                    client_socket,
+                    {
+                        "header": self._next_header(MSG_JOINT),
+                        "payload": {
+                            "joint_left": joint_snapshot[0].tolist(),
+                            "joint_right": joint_snapshot[1].tolist(),
+                        },
+                    },
+                )
+            except (OSError, ValueError) as exc:
+                self._logger.warning("Failed to send takeover joint snapshot: %s", exc)
+                self._drop_client_connection()
+                return False
+            return True
+
+        if current_mode == self.config.takeover_mode_value and snapshot_dirty:
+            # For the TCP master, MSG_MODE and MSG_JOINT are consumed by different
+            # threads. Send the fresh joint snapshot before the mode transition so
+            # the master cannot align to a stale cached snapshot. Send it once more
+            # after mode for clients that clear joint caches on mode transitions.
+            if not send_joint_snapshot():
+                return
+            if mode_dirty:
+                if not send_mode():
+                    return
+                with self._state_lock:
+                    self._mode_dirty = False
+                if not send_joint_snapshot():
+                    return
+
+            now = time.time()
+            with self._state_lock:
+                self._snapshot_dirty = False
+                self._master_pose_left = None
+                self._master_pose_right = None
+                self._master_pose_timestamp_us = 0
+                self._follow_start_time = now + self.config.takeover_delay_s
+                self._min_pose_timestamp_us = int(self._follow_start_time * 1e6)
+            return
+
+        if mode_dirty:
+            if not send_mode():
                 return
             with self._state_lock:
                 self._mode_dirty = False
-
-        if current_mode != self.config.takeover_mode_value or not snapshot_dirty:
             return
-
-        joint_snapshot = np.asarray(self._joint_snapshot_getter(), dtype=np.float32)
-        if joint_snapshot.shape != (2, 7):
-            self._logger.warning(
-                "Skip takeover joint snapshot: expected shape (2, 7), got %s",
-                joint_snapshot.shape,
-            )
-            return
-
-        try:
-            send_frame(
-                client_socket,
-                {
-                    "header": self._next_header(MSG_JOINT),
-                    "payload": {
-                        "joint_left": joint_snapshot[0].tolist(),
-                        "joint_right": joint_snapshot[1].tolist(),
-                    },
-                },
-            )
-        except (OSError, ValueError) as exc:
-            self._logger.warning("Failed to send takeover joint snapshot: %s", exc)
-            self._drop_client_connection()
-            return
-
-        now = time.time()
-        with self._state_lock:
-            self._snapshot_dirty = False
-            self._master_pose_left = None
-            self._master_pose_right = None
-            self._master_pose_timestamp_us = 0
-            self._follow_start_time = now + self.config.takeover_delay_s
-            self._min_pose_timestamp_us = int(self._follow_start_time * 1e6)
 
 
 def make_ros_running_mode_getter(config: X2RobotTakeoverTCPConfig) -> Callable[[], int]:

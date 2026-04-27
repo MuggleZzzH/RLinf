@@ -95,6 +95,7 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
     def step(self, action):
         new_action, replaced, chunk_holding, sync_holding = self.action(action)
         obs, rew, done, truncated, info = self.env.step(new_action)
+        self.adapter.sync_control_plane()
         info["executed_action"] = new_action
         info["intervene_flag"] = np.asarray([replaced], dtype=bool)
         if replaced:

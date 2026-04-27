@@ -14,22 +14,33 @@
 
 from __future__ import annotations
 
+import socket
+
 import gymnasium as gym
 import numpy as np
 import pytest
 
+from rlinf.envs.realworld.common.takeover.x2robot_protocol import (
+    MSG_JOINT,
+    MSG_MODE,
+    X2RobotTakeoverTCPConfig,
+    X2RobotTakeoverTCPServer,
+    recv_frame,
+)
 from rlinf.envs.realworld.common.wrappers.master_takeover_intervention import (
     MasterTakeoverIntervention,
 )
 
 
 class FakeTakeoverAdapter:
-    def __init__(self, states, initial_active=False):
+    def __init__(self, states, initial_active=False, events=None):
         self.states = list(states)
         self.initial_active = initial_active
         self.index = -1
         self.started = False
         self.closed = False
+        self.events = events
+        self.sync_count = 0
 
     def start(self):
         self.started = True
@@ -38,7 +49,14 @@ class FakeTakeoverAdapter:
         self.closed = True
 
     def poll(self):
+        if self.events is not None:
+            self.events.append("poll")
         self.index += 1
+
+    def sync_control_plane(self):
+        self.sync_count += 1
+        if self.events is not None:
+            self.events.append("sync")
 
     def is_takeover_active(self):
         if self.index < 0:
@@ -56,7 +74,7 @@ class FakeTakeoverAdapter:
 
 
 class DummyTakeoverEnv(gym.Env):
-    def __init__(self, joint_shape=(2, 7)):
+    def __init__(self, joint_shape=(2, 7), events=None):
         self.action_space = gym.spaces.Box(-10.0, 10.0, shape=(14,), dtype=np.float32)
         self.observation_space = gym.spaces.Box(
             -10.0, 10.0, shape=(14,), dtype=np.float32
@@ -64,8 +82,11 @@ class DummyTakeoverEnv(gym.Env):
         self.last_action = None
         self.joint_snapshot = np.zeros(joint_shape, dtype=np.float32)
         self.pose_snapshot = np.arange(14, dtype=np.float32).reshape(2, 7)
+        self.events = events
 
     def step(self, action):
+        if self.events is not None:
+            self.events.append("env_step")
         self.last_action = np.asarray(action, dtype=np.float32)
         return np.zeros(14, dtype=np.float32), 0.0, False, False, {}
 
@@ -95,8 +116,9 @@ def test_master_takeover_mode_1_passes_policy_action():
 
 
 def test_master_takeover_mode_2_without_fresh_pose_holds_current_pose():
-    env = DummyTakeoverEnv()
-    adapter = FakeTakeoverAdapter(states=[(True, None)])
+    events = []
+    env = DummyTakeoverEnv(events=events)
+    adapter = FakeTakeoverAdapter(states=[(True, None)], events=events)
     wrapped = MasterTakeoverIntervention(env, adapter=adapter)
 
     action = np.ones(14, dtype=np.float32)
@@ -110,6 +132,7 @@ def test_master_takeover_mode_2_without_fresh_pose_holds_current_pose():
     assert not info["takeover_chunk_hold"]
     assert not info["intervene_flag"].item()
     assert "intervene_action" not in info
+    assert events == ["poll", "env_step", "sync"]
 
 
 def test_master_takeover_mode_2_fresh_pose_overrides_policy_action():
@@ -161,3 +184,30 @@ def test_master_takeover_rejects_bad_joint_snapshot_shape():
             DummyTakeoverEnv(joint_shape=(1, 7)),
             adapter=FakeTakeoverAdapter(states=[]),
         )
+
+
+def test_takeover_control_plane_sends_joint_before_mode_on_takeover():
+    client_sock, server_sock = socket.socketpair()
+    try:
+        adapter = X2RobotTakeoverTCPServer(
+            config=X2RobotTakeoverTCPConfig(takeover_delay_s=0.0),
+            running_mode_getter=lambda: 2,
+            joint_snapshot_getter=lambda: np.arange(14, dtype=np.float32).reshape(2, 7),
+        )
+        adapter._client_socket = server_sock
+        adapter._current_mode = 2
+        adapter._mode_dirty = True
+        adapter._snapshot_dirty = True
+
+        adapter.sync_control_plane()
+
+        first = recv_frame(client_sock)
+        second = recv_frame(client_sock)
+        third = recv_frame(client_sock)
+        assert first["header"]["msg_type"] == MSG_JOINT
+        assert second["header"]["msg_type"] == MSG_MODE
+        assert second["payload"]["running_mode"] == 2
+        assert third["header"]["msg_type"] == MSG_JOINT
+    finally:
+        client_sock.close()
+        server_sock.close()
