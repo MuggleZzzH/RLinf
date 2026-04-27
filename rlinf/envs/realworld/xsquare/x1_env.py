@@ -44,6 +44,8 @@ class X1RobotConfig:
     debug_pose_control: bool = False
     debug_gripper_control: bool = False
     gripper_target_tolerance: float = 0.05
+    follower_joint_cmd_left_topic: str = "/follow_joint_control_1"
+    follower_joint_cmd_right_topic: str = "/follow_joint_control_2"
 
     # Positions are stored in eular angles (xyz for position, rzryrx for orientation)
     # It will be converted to quaternions internally
@@ -78,6 +80,9 @@ class X1RobotConfig:
     )
     gripper_width_limit_min: float = 0.0
     gripper_width_limit_max: float = 5.0
+    joint_limit_min: np.ndarray = field(default_factory=lambda: np.full((2, 7), -np.inf))
+    joint_limit_max: np.ndarray = field(default_factory=lambda: np.full((2, 7), np.inf))
+    max_joint_delta: float = float("inf")
     enforce_gripper_close: bool = True
     enable_gripper_penalty: bool = True
     gripper_penalty: float = 0.1
@@ -156,6 +161,8 @@ class X1Env(gym.Env):
             debug_pose_control=self.config.debug_pose_control,
             debug_gripper_control=self.config.debug_gripper_control,
             gripper_target_tolerance=self.config.gripper_target_tolerance,
+            follower_joint_cmd_left_topic=self.config.follower_joint_cmd_left_topic,
+            follower_joint_cmd_right_topic=self.config.follower_joint_cmd_right_topic,
         )
 
     def _init_action_obs_spaces(self):

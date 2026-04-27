@@ -51,6 +51,27 @@ class X1DeployEnvConfig(X1RobotConfig):
             self.reward_threshold, dtype=np.float64
         ).reshape(2, 6)
         self.action_scale = np.asarray(self.action_scale, dtype=np.float64)
+        self.joint_limit_min = np.asarray(self.joint_limit_min, dtype=np.float64)
+        self.joint_limit_max = np.asarray(self.joint_limit_max, dtype=np.float64)
+        if self.joint_limit_min.shape == (7,):
+            self.joint_limit_min = np.stack([self.joint_limit_min] * 2)
+        if self.joint_limit_max.shape == (7,):
+            self.joint_limit_max = np.stack([self.joint_limit_max] * 2)
+        self.joint_limit_min = self.joint_limit_min.reshape(2, 7)
+        self.joint_limit_max = self.joint_limit_max.reshape(2, 7)
+        if self.joint_limit_min.shape != (2, 7):
+            raise ValueError(
+                "joint_limit_min must be shape (2, 7) or (7,), "
+                f"got {self.joint_limit_min.shape}."
+            )
+        if self.joint_limit_max.shape != (2, 7):
+            raise ValueError(
+                "joint_limit_max must be shape (2, 7) or (7,), "
+                f"got {self.joint_limit_max.shape}."
+            )
+        if np.any(self.joint_limit_min > self.joint_limit_max):
+            raise ValueError("joint_limit_min must be <= joint_limit_max.")
+        self.max_joint_delta = float(self.max_joint_delta)
 
 
 class X1DeployEnv(X1Env):
@@ -91,9 +112,22 @@ class X1DeployEnv(X1Env):
             high=np.concatenate(action_high).astype(np.float32),
             dtype=np.float32,
         )
+        joint_low = []
+        joint_high = []
+        for arm_id in self.config.use_arm_ids:
+            joint_low.append(self.config.joint_limit_min[arm_id])
+            joint_high.append(self.config.joint_limit_max[arm_id])
+        self._joint_action_space = gym.spaces.Box(
+            low=np.concatenate(joint_low).astype(np.float32),
+            high=np.concatenate(joint_high).astype(np.float32),
+            dtype=np.float32,
+        )
 
     def get_absolute_pose_action_space(self) -> gym.spaces.Box:
         return self._absolute_pose_action_space
+
+    def get_joint_action_space(self) -> gym.spaces.Box:
+        return self._joint_action_space
 
     def get_relative_pose_action_space(self) -> gym.spaces.Box:
         return self._relative_pose_action_space
@@ -186,6 +220,79 @@ class X1DeployEnv(X1Env):
             "executed_action": executed_action,
             "action_clipped": action_clipped,
             "clip_delta_max": clip_delta_max,
+        }
+        return observation, reward, terminated, truncated, info
+
+    def step_joint(self, action: np.ndarray):
+        action = np.asarray(action, dtype=np.float32)
+        expected_shape = (len(self.config.use_arm_ids) * 7,)
+        assert action.shape == expected_shape, (
+            f"Joint action shape must be {expected_shape}, but got {action.shape}."
+        )
+
+        start_time = time.time()
+        raw_joint_action = action.reshape(-1).copy()
+        joint_target = np.clip(
+            raw_joint_action,
+            self._joint_action_space.low,
+            self._joint_action_space.high,
+        ).astype(np.float32, copy=False)
+
+        current_joints = np.stack(
+            [self._x1_state.follow1_joints, self._x1_state.follow2_joints]
+        ).astype(np.float32)
+        current_selected = np.concatenate(
+            [current_joints[arm_id] for arm_id in self.config.use_arm_ids]
+        )
+        if np.isfinite(self.config.max_joint_delta):
+            max_delta = float(self.config.max_joint_delta)
+            joint_target = np.clip(
+                joint_target,
+                current_selected - max_delta,
+                current_selected + max_delta,
+            ).astype(np.float32, copy=False)
+
+        if self.config.enforce_gripper_close:
+            joint_target = joint_target.copy()
+            for row_idx in range(len(self.config.use_arm_ids)):
+                joint_target[row_idx * 7 + 6] = self.config.gripper_width_limit_min
+
+        executed_joint_action = joint_target.reshape(-1).copy()
+        clip_delta = np.abs(executed_joint_action - raw_joint_action)
+        clip_delta_max = float(np.max(clip_delta)) if clip_delta.size else 0.0
+        joint_action_clipped = bool(clip_delta_max > 1e-6)
+
+        next_joints = current_joints.copy()
+        target_rows = executed_joint_action.reshape(-1, 7)
+        for action_row, arm_id in zip(
+            target_rows, self.config.use_arm_ids, strict=False
+        ):
+            next_joints[arm_id] = action_row
+
+        if not self.config.is_dummy:
+            self._controller.move_joint(
+                next_joints[0].tolist(), next_joints[1].tolist()
+            ).wait()
+        else:
+            self._x1_state.follow1_joints = next_joints[0].copy()
+            self._x1_state.follow2_joints = next_joints[1].copy()
+
+        self._num_steps += 1
+        step_time = time.time() - start_time
+        time.sleep(max(0, (1.0 / self.config.step_frequency) - step_time))
+
+        if not self.config.is_dummy:
+            self._x1_state = self._controller.get_state().wait()[0]
+        observation = self._get_observation()
+        reward = self._calc_step_reward(observation)
+        terminated = False
+        truncated = self._num_steps >= self.config.max_num_steps
+        info = {
+            "raw_joint_action": raw_joint_action,
+            "executed_joint_action": executed_joint_action,
+            "joint_action_clipped": joint_action_clipped,
+            "joint_clip_delta_max": clip_delta_max,
+            "takeover_control_mode": "joint",
         }
         return observation, reward, terminated, truncated, info
 

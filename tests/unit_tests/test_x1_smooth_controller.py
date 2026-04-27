@@ -28,6 +28,22 @@ class FakeArmsController:
         self.commands.append((list(left), list(right)))
 
 
+class FakeJointPublisher:
+    def __init__(self):
+        self.messages = []
+
+    def publish(self, msg):
+        self.messages.append(msg)
+
+
+class FakeJointControl:
+    def __init__(self):
+        self.joint_pos = []
+        self.joint_vel = []
+        self.joint_cur = []
+        self.mode = None
+
+
 def _install_controller_import_stubs(monkeypatch):
     rospy = types.ModuleType("rospy")
     rospy.loginfo_throttle = lambda *args, **kwargs: None
@@ -173,3 +189,25 @@ def test_smooth_controller_circular_midpoint_does_not_jump_to_zero(monkeypatch):
     )
 
     assert abs(abs(midpoint[0]) - np.pi) < 0.05
+
+
+def test_smooth_controller_move_joint_publishes_joint_control(monkeypatch):
+    controller_cls = _load_controller_class(monkeypatch)
+    controller = controller_cls.__new__(controller_cls)
+    controller._joint_cmd_msg_cls = FakeJointControl
+    controller._joint_cmd_left_pub = FakeJointPublisher()
+    controller._joint_cmd_right_pub = FakeJointPublisher()
+    left = [0.1] * 7
+    right = [0.2] * 7
+
+    controller.move_joint(left, right)
+
+    assert len(controller._joint_cmd_left_pub.messages) == 1
+    assert len(controller._joint_cmd_right_pub.messages) == 1
+    left_msg = controller._joint_cmd_left_pub.messages[0]
+    right_msg = controller._joint_cmd_right_pub.messages[0]
+    assert left_msg.joint_pos == left
+    assert right_msg.joint_pos == right
+    assert left_msg.joint_vel == [0.0] * 7
+    assert right_msg.joint_cur == [0.0] * 7
+    assert left_msg.mode == 0

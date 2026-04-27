@@ -45,6 +45,8 @@ class X1SmoothController(Worker):
         debug_pose_control: bool = False,
         debug_gripper_control: bool = False,
         gripper_target_tolerance: float = 0.05,
+        follower_joint_cmd_left_topic: str = "/follow_joint_control_1",
+        follower_joint_cmd_right_topic: str = "/follow_joint_control_2",
     ):
         """Launch a X1SmoothController on the specified worker's node.
 
@@ -63,6 +65,8 @@ class X1SmoothController(Worker):
             debug_pose_control,
             debug_gripper_control,
             gripper_target_tolerance,
+            follower_joint_cmd_left_topic,
+            follower_joint_cmd_right_topic,
         ).launch(
             cluster=cluster,
             placement_strategy=placement,
@@ -75,6 +79,8 @@ class X1SmoothController(Worker):
         debug_pose_control: bool = False,
         debug_gripper_control: bool = False,
         gripper_target_tolerance: float = 0.05,
+        follower_joint_cmd_left_topic: str = "/follow_joint_control_1",
+        follower_joint_cmd_right_topic: str = "/follow_joint_control_2",
     ):
         super().__init__()
         self._logger = get_logger()
@@ -87,6 +93,11 @@ class X1SmoothController(Worker):
         self.controller.chassis_set_current_pose_as_virtual_zero()
 
         self._state = X1RobotState()
+        self._follower_joint_cmd_left_topic = follower_joint_cmd_left_topic
+        self._follower_joint_cmd_right_topic = follower_joint_cmd_right_topic
+        self._joint_cmd_msg_cls = None
+        self._joint_cmd_left_pub = None
+        self._joint_cmd_right_pub = None
 
         control_period = rospy.Duration(1 / freq)
         state_period = rospy.Duration(1 / 200.0)
@@ -429,6 +440,47 @@ class X1SmoothController(Worker):
         )
         self.left_arm_target = left_arm_target
         self.right_arm_target = right_arm_target
+
+    def _make_joint_control_msg(self, joint_pos):
+        msg = self._joint_cmd_msg_cls()
+        msg.joint_pos = list(joint_pos)
+        msg.joint_vel = [0.0] * len(msg.joint_pos)
+        msg.joint_cur = [0.0] * len(msg.joint_pos)
+        if hasattr(msg, "mode"):
+            msg.mode = 0
+        return msg
+
+    def _ensure_joint_publishers(self):
+        if (
+            self._joint_cmd_msg_cls is not None
+            and self._joint_cmd_left_pub is not None
+            and self._joint_cmd_right_pub is not None
+        ):
+            return
+        from communicationPort.msg import JointControl
+
+        self._joint_cmd_msg_cls = JointControl
+        self._joint_cmd_left_pub = rospy.Publisher(
+            self._follower_joint_cmd_left_topic,
+            JointControl,
+            queue_size=10,
+        )
+        self._joint_cmd_right_pub = rospy.Publisher(
+            self._follower_joint_cmd_right_topic,
+            JointControl,
+            queue_size=10,
+        )
+
+    def move_joint(self, left_joint_target, right_joint_target):
+        assert isinstance(left_joint_target, list) and len(left_joint_target) == 7, (
+            "left_joint_target should be a list of length 7"
+        )
+        assert isinstance(right_joint_target, list) and len(right_joint_target) == 7, (
+            "right_joint_target should be a list of length 7"
+        )
+        self._ensure_joint_publishers()
+        self._joint_cmd_left_pub.publish(self._make_joint_control_msg(left_joint_target))
+        self._joint_cmd_right_pub.publish(self._make_joint_control_msg(right_joint_target))
 
     def hold_current_pose(self):
         state = self._update_state_from_controller()

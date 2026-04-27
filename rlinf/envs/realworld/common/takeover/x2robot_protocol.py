@@ -29,6 +29,7 @@ VERSION = 1
 MSG_MODE = 1
 MSG_POSE = 2
 MSG_JOINT = 3
+MSG_JOINT_CMD = 4
 
 HEADER_FMT = "<BBIQ"
 HEADER_SIZE = struct.calcsize(HEADER_FMT)
@@ -53,8 +54,18 @@ class X2RobotTakeoverTCPConfig:
     takeover_mode_value: int = 2
     takeover_delay_s: float = 4.0
     slave_hold_settle_s: float = 0.0
+    control_mode: str = "pose"
     max_pose_age_s: float = 0.25
+    max_joint_age_s: float = 0.25
     debug_log: bool = False
+
+    def __post_init__(self):
+        self.control_mode = str(self.control_mode).lower()
+        if self.control_mode not in {"pose", "joint"}:
+            raise ValueError(
+                "master_takeover.control_mode must be one of {'pose', 'joint'}, "
+                f"got {self.control_mode!r}."
+            )
 
     @classmethod
     def from_dict(
@@ -116,7 +127,7 @@ def recv_frame(sock: socket.socket) -> dict[str, dict[str, Any]]:
             "pose_left": list(values[:7]),
             "pose_right": list(values[7:]),
         }
-    elif msg_type == MSG_JOINT:
+    elif msg_type in (MSG_JOINT, MSG_JOINT_CMD):
         if len(payload_bytes) < 1:
             raise ValueError("JOINT frame missing payload")
         joint_count = payload_bytes[0]
@@ -165,12 +176,18 @@ def send_frame(sock: socket.socket, data: dict[str, dict[str, Any]]) -> None:
         if len(pose_left) != 7 or len(pose_right) != 7:
             raise ValueError("pose_left and pose_right must have 7 floats")
         payload_bytes = struct.pack("<" + "f" * 14, *(pose_left + pose_right))
-    elif msg_type == MSG_JOINT:
+    elif msg_type in (MSG_JOINT, MSG_JOINT_CMD):
         joint_left = list(payload.get("joint_left") or [])
         joint_right = list(payload.get("joint_right") or [])
         joint_count = int(
             payload.get("joint_count", min(len(joint_left), len(joint_right)))
         )
+        if msg_type == MSG_JOINT_CMD and (
+            joint_count != 7 or len(joint_left) != 7 or len(joint_right) != 7
+        ):
+            raise ValueError(
+                "MSG_JOINT_CMD requires joint_left and joint_right to be 7D"
+            )
         if joint_count <= 0:
             raise ValueError("joint_count must be > 0")
         payload_bytes = struct.pack("<B", joint_count)
@@ -220,9 +237,15 @@ class X2RobotTakeoverTCPServer:
         self._master_pose_timestamp_us = 0
         self._master_pose_seq = 0
         self._master_pose_recv_time = 0.0
+        self._master_joint_left: np.ndarray | None = None
+        self._master_joint_right: np.ndarray | None = None
+        self._master_joint_timestamp_us = 0
+        self._master_joint_seq = 0
+        self._master_joint_recv_time = 0.0
         self._follow_start_time: float | None = None
         self._min_pose_timestamp_us = 0
         self._last_pose_debug_log_time = 0.0
+        self._last_joint_debug_log_time = 0.0
 
     def start(self) -> None:
         if self._io_thread is not None:
@@ -272,6 +295,11 @@ class X2RobotTakeoverTCPServer:
                 self._master_pose_timestamp_us = 0
                 self._master_pose_seq = 0
                 self._master_pose_recv_time = 0.0
+                self._master_joint_left = None
+                self._master_joint_right = None
+                self._master_joint_timestamp_us = 0
+                self._master_joint_seq = 0
+                self._master_joint_recv_time = 0.0
                 self._follow_start_time = None
                 self._min_pose_timestamp_us = 0
                 self._snapshot_dirty = running_mode == self.config.takeover_mode_value
@@ -322,6 +350,37 @@ class X2RobotTakeoverTCPServer:
                 [self._master_pose_left, self._master_pose_right], axis=0
             ).astype(np.float32)
 
+    def get_takeover_joint_action(self) -> np.ndarray | None:
+        with self._state_lock:
+            now = time.time()
+            if self._current_mode != self.config.takeover_mode_value:
+                return None
+            if self._follow_start_time is None or now < self._follow_start_time:
+                if self.config.debug_log:
+                    self._log_joint_gate_locked("delay", now)
+                return None
+            if (
+                self._master_joint_left is None
+                or self._master_joint_right is None
+                or self._master_joint_recv_time <= self._follow_start_time
+            ):
+                if self.config.debug_log:
+                    self._log_joint_gate_locked("missing_or_before_gate", now)
+                return None
+            joint_age_s = now - self._master_joint_recv_time
+            if (
+                self.config.max_joint_age_s > 0
+                and joint_age_s > self.config.max_joint_age_s
+            ):
+                if self.config.debug_log:
+                    self._log_joint_gate_locked("stale", now, joint_age_s=joint_age_s)
+                return None
+            if self.config.debug_log:
+                self._log_joint_gate_locked("fresh", now, joint_age_s=joint_age_s)
+            return np.concatenate(
+                [self._master_joint_left, self._master_joint_right], axis=0
+            ).astype(np.float32)
+
     def _log_pose_gate_locked(
         self,
         reason: str,
@@ -347,6 +406,30 @@ class X2RobotTakeoverTCPServer:
             now,
         )
 
+    def _log_joint_gate_locked(
+        self,
+        reason: str,
+        now: float,
+        joint_age_s: float | None = None,
+    ) -> None:
+        if now - self._last_joint_debug_log_time < 1.0:
+            return
+        self._last_joint_debug_log_time = now
+        follow_start = self._follow_start_time or 0.0
+        if joint_age_s is None and self._master_joint_recv_time > 0:
+            joint_age_s = now - self._master_joint_recv_time
+        self._logger.info(
+            "X1 takeover joint gate: reason=%s seq=%s joint_age_s=%s "
+            "joint_ts_us=%s joint_recv=%.6f follow_start=%.6f now=%.6f",
+            reason,
+            self._master_joint_seq,
+            "none" if joint_age_s is None else f"{joint_age_s:.4f}",
+            self._master_joint_timestamp_us,
+            self._master_joint_recv_time,
+            follow_start,
+            now,
+        )
+
     def _io_loop(self) -> None:
         while not self._stop_event.is_set():
             client_socket = self._ensure_client_connection()
@@ -363,16 +446,32 @@ class X2RobotTakeoverTCPServer:
                 continue
             header = frame["header"]
             payload = frame["payload"]
-            if header["msg_type"] != MSG_POSE:
+            if header["msg_type"] == MSG_POSE:
+                pose_left = np.asarray(payload["pose_left"], dtype=np.float32)
+                pose_right = np.asarray(payload["pose_right"], dtype=np.float32)
+                with self._state_lock:
+                    self._master_pose_left = pose_left
+                    self._master_pose_right = pose_right
+                    self._master_pose_timestamp_us = int(header["timestamp_us"])
+                    self._master_pose_seq = int(header["seq"])
+                    self._master_pose_recv_time = time.time()
                 continue
-            pose_left = np.asarray(payload["pose_left"], dtype=np.float32)
-            pose_right = np.asarray(payload["pose_right"], dtype=np.float32)
-            with self._state_lock:
-                self._master_pose_left = pose_left
-                self._master_pose_right = pose_right
-                self._master_pose_timestamp_us = int(header["timestamp_us"])
-                self._master_pose_seq = int(header["seq"])
-                self._master_pose_recv_time = time.time()
+            if header["msg_type"] == MSG_JOINT_CMD:
+                joint_left = np.asarray(payload["joint_left"], dtype=np.float32)
+                joint_right = np.asarray(payload["joint_right"], dtype=np.float32)
+                if joint_left.shape != (7,) or joint_right.shape != (7,):
+                    self._logger.warning(
+                        "Drop takeover joint cmd: expected two 7D joints, got %s and %s",
+                        joint_left.shape,
+                        joint_right.shape,
+                    )
+                    continue
+                with self._state_lock:
+                    self._master_joint_left = joint_left
+                    self._master_joint_right = joint_right
+                    self._master_joint_timestamp_us = int(header["timestamp_us"])
+                    self._master_joint_seq = int(header["seq"])
+                    self._master_joint_recv_time = time.time()
 
     def _ensure_client_connection(self) -> socket.socket | None:
         with self._socket_lock:
@@ -401,6 +500,11 @@ class X2RobotTakeoverTCPServer:
                 self._master_pose_timestamp_us = 0
                 self._master_pose_seq = 0
                 self._master_pose_recv_time = 0.0
+                self._master_joint_left = None
+                self._master_joint_right = None
+                self._master_joint_timestamp_us = 0
+                self._master_joint_seq = 0
+                self._master_joint_recv_time = 0.0
                 self._follow_start_time = None
                 self._min_pose_timestamp_us = 0
         self._logger.info("Master takeover client connected from %s", client_addr)
@@ -424,6 +528,11 @@ class X2RobotTakeoverTCPServer:
                 self._master_pose_timestamp_us = 0
                 self._master_pose_seq = 0
                 self._master_pose_recv_time = 0.0
+                self._master_joint_left = None
+                self._master_joint_right = None
+                self._master_joint_timestamp_us = 0
+                self._master_joint_seq = 0
+                self._master_joint_recv_time = 0.0
                 self._follow_start_time = None
                 self._min_pose_timestamp_us = 0
 
@@ -525,16 +634,23 @@ class X2RobotTakeoverTCPServer:
                 self._master_pose_timestamp_us = 0
                 self._master_pose_seq = 0
                 self._master_pose_recv_time = 0.0
+                self._master_joint_left = None
+                self._master_joint_right = None
+                self._master_joint_timestamp_us = 0
+                self._master_joint_seq = 0
+                self._master_joint_recv_time = 0.0
                 self._follow_start_time = now + self.config.takeover_delay_s
                 self._min_pose_timestamp_us = int(self._follow_start_time * 1e6)
                 if self.config.debug_log:
                     self._logger.info(
-                        "X1 takeover protocol waiting for fresh master pose: now=%.6f follow_start=%.6f delay=%.3f min_pose_ts_us=%s max_pose_age_s=%.3f",
+                        "X1 takeover protocol waiting for fresh master %s: now=%.6f follow_start=%.6f delay=%.3f min_pose_ts_us=%s max_pose_age_s=%.3f max_joint_age_s=%.3f",
+                        self.config.control_mode,
                         now,
                         self._follow_start_time,
                         self.config.takeover_delay_s,
                         self._min_pose_timestamp_us,
                         self.config.max_pose_age_s,
+                        self.config.max_joint_age_s,
                     )
             return
 

@@ -14,6 +14,7 @@
 
 from .x2robot_protocol import (
     MSG_JOINT,
+    MSG_JOINT_CMD,
     MSG_MODE,
     MSG_POSE,
     X2RobotTakeoverTCPConfig,
@@ -24,6 +25,7 @@ from .x2robot_protocol import (
 
 __all__ = [
     "MSG_JOINT",
+    "MSG_JOINT_CMD",
     "MSG_MODE",
     "MSG_POSE",
     "X2RobotTakeoverTCPConfig",

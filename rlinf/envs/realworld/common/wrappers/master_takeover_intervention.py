@@ -62,6 +62,15 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
         self.adapter = adapter
         self._logger = logging.getLogger(__name__)
         adapter_config = getattr(adapter, "config", None)
+        self._control_mode = str(getattr(adapter_config, "control_mode", "pose")).lower()
+        if self._control_mode not in {"pose", "joint"}:
+            raise ValueError(
+                "master_takeover.control_mode must be one of {'pose', 'joint'}, "
+                f"got {self._control_mode!r}."
+            )
+        self._step_joint = (
+            self.get_wrapper_attr("step_joint") if self._control_mode == "joint" else None
+        )
         self._debug_log = bool(
             getattr(adapter_config, "debug_log", False)
             or (config is not None and bool(config.get("debug_log", False)))
@@ -87,7 +96,9 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
         self._chunk_active = False
         self._hold_until_chunk_end = False
 
-    def action(self, action: np.ndarray) -> tuple[np.ndarray, bool, bool, bool, str]:
+    def action(
+        self, action: np.ndarray
+    ) -> tuple[np.ndarray, bool, bool, bool, str, str]:
         self.adapter.poll()
         takeover_active = self.adapter.is_takeover_active()
         if self._chunk_active and self._was_takeover_active and not takeover_active:
@@ -107,7 +118,12 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
                 )
         self._was_takeover_active = takeover_active
 
-        expert_action = self.adapter.get_takeover_action()
+        if self._control_mode == "joint":
+            expert_action = self.adapter.get_takeover_joint_action()
+            expert_control_mode = "joint"
+        else:
+            expert_action = self.adapter.get_takeover_action()
+            expert_control_mode = "pose"
         if expert_action is not None:
             return (
                 expert_action.astype(np.float32, copy=False),
@@ -115,24 +131,33 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
                 False,
                 False,
                 "expert",
+                expert_control_mode,
             )
 
         if takeover_active:
             self._takeover_sync_hold_steps += 1
-            return self._hold_action(), False, False, True, "sync_hold"
+            return self._hold_action(), False, False, True, "sync_hold", "pose"
 
         if self._hold_until_chunk_end:
-            return self._hold_action(), False, True, False, "chunk_hold"
+            return self._hold_action(), False, True, False, "chunk_hold", "pose"
 
-        return action, False, False, False, "policy"
+        return action, False, False, False, "policy", "pose"
 
     def step(self, action):
         step_start = time.time()
-        new_action, replaced, chunk_holding, sync_holding, decision = self.action(action)
+        (
+            new_action,
+            replaced,
+            chunk_holding,
+            sync_holding,
+            decision,
+            selected_control_mode,
+        ) = self.action(action)
         action_selected_time = time.time()
         pre_step_sync_done = False
         if sync_holding and self._takeover_sync_hold_steps == 1:
             new_action = self._hard_hold_action()
+            selected_control_mode = "pose"
             if self._slave_hold_settle_s > 0:
                 if self._debug_log:
                     self._logger.info(
@@ -142,14 +167,22 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
                 time.sleep(self._slave_hold_settle_s)
             self.adapter.sync_control_plane()
             pre_step_sync_done = True
-        obs, rew, done, truncated, info = self.env.step(new_action)
+        if selected_control_mode == "joint":
+            obs, rew, done, truncated, info = self._step_joint(new_action)
+        else:
+            obs, rew, done, truncated, info = self.env.step(new_action)
         env_step_done_time = time.time()
         if not pre_step_sync_done:
             self.adapter.sync_control_plane()
         control_plane_done_time = time.time()
-        executed_action = np.asarray(
-            info.get("executed_action", new_action), dtype=np.float32
-        )
+        if selected_control_mode == "joint":
+            executed_for_log = np.asarray(
+                info.get("executed_joint_action", new_action), dtype=np.float32
+            )
+        else:
+            executed_for_log = np.asarray(
+                info.get("executed_action", new_action), dtype=np.float32
+            )
         if self._debug_log and (
             self.adapter.is_takeover_active() or decision != "policy"
         ):
@@ -162,13 +195,19 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
                 env_step_done_time - action_selected_time,
                 control_plane_done_time - env_step_done_time,
                 np.array2string(np.asarray(new_action), precision=4, threshold=20),
-                np.array2string(executed_action, precision=4, threshold=20),
+                np.array2string(executed_for_log, precision=4, threshold=20),
             )
         self._chunk_step_index += 1
-        info["executed_action"] = executed_action
+        info["takeover_control_mode"] = self._control_mode
+        if selected_control_mode == "joint":
+            info["executed_joint_action"] = executed_for_log
+        else:
+            info["executed_action"] = executed_for_log
         info["intervene_flag"] = np.asarray([replaced], dtype=bool)
-        if replaced:
-            info["intervene_action"] = executed_action
+        if replaced and selected_control_mode == "joint":
+            info["intervene_joint_action"] = executed_for_log
+        elif replaced:
+            info["intervene_action"] = executed_for_log
         info["takeover_active"] = self.adapter.is_takeover_active()
         info["takeover_chunk_hold"] = chunk_holding
         info["takeover_sync_hold"] = sync_holding
