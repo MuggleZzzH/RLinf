@@ -162,3 +162,14 @@ def test_smooth_controller_uses_shortest_rpy_delta(monkeypatch):
 
     assert delta[0] < 0
     assert abs(delta[0]) < 0.1
+
+
+def test_smooth_controller_circular_midpoint_does_not_jump_to_zero(monkeypatch):
+    controller_cls = _load_controller_class(monkeypatch)
+
+    midpoint = controller_cls._circular_midpoint(
+        np.array([-3.13], dtype=np.float32),
+        np.array([3.13], dtype=np.float32),
+    )
+
+    assert abs(abs(midpoint[0]) - np.pi) < 0.05

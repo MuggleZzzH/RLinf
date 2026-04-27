@@ -306,10 +306,10 @@ class X2RobotTakeoverTCPServer:
             if (
                 self._master_pose_left is None
                 or self._master_pose_right is None
-                or self._master_pose_timestamp_us <= self._min_pose_timestamp_us
+                or self._master_pose_recv_time <= self._follow_start_time
             ):
                 if self.config.debug_log:
-                    self._log_pose_gate_locked("missing_or_old", now)
+                    self._log_pose_gate_locked("missing_or_before_gate", now)
                 return None
             pose_age_s = now - self._master_pose_recv_time
             if self.config.max_pose_age_s > 0 and pose_age_s > self.config.max_pose_age_s:
@@ -336,12 +336,13 @@ class X2RobotTakeoverTCPServer:
             pose_age_s = now - self._master_pose_recv_time
         self._logger.info(
             "X1 takeover pose gate: reason=%s seq=%s pose_age_s=%s "
-            "pose_ts_us=%s min_pose_ts_us=%s follow_start=%.6f now=%.6f",
+            "pose_ts_us=%s min_pose_ts_us=%s pose_recv=%.6f follow_start=%.6f now=%.6f",
             reason,
             self._master_pose_seq,
             "none" if pose_age_s is None else f"{pose_age_s:.4f}",
             self._master_pose_timestamp_us,
             self._min_pose_timestamp_us,
+            self._master_pose_recv_time,
             follow_start,
             now,
         )

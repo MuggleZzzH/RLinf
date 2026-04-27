@@ -276,24 +276,50 @@ def test_takeover_action_rejects_stale_pose_receive_time():
     assert adapter.get_takeover_action() is None
 
 
-def test_takeover_action_rejects_pose_before_follow_gate_timestamp():
+def test_takeover_action_rejects_pose_received_before_follow_gate():
     adapter = X2RobotTakeoverTCPServer(
         config=X2RobotTakeoverTCPConfig(takeover_delay_s=0.0, max_pose_age_s=1.0),
         running_mode_getter=lambda: 2,
         joint_snapshot_getter=lambda: np.zeros((2, 7), dtype=np.float32),
     )
     now = time.time()
+    follow_start_time = now - 0.5
     with adapter._state_lock:
         adapter._current_mode = 2
-        adapter._follow_start_time = now - 1.0
-        adapter._min_pose_timestamp_us = int(now * 1e6)
+        adapter._follow_start_time = follow_start_time
+        adapter._min_pose_timestamp_us = int(follow_start_time * 1e6)
         adapter._master_pose_left = np.ones(7, dtype=np.float32)
         adapter._master_pose_right = np.ones(7, dtype=np.float32) * 2
-        adapter._master_pose_timestamp_us = adapter._min_pose_timestamp_us
+        adapter._master_pose_timestamp_us = int(now * 1e6)
         adapter._master_pose_seq = 4
-        adapter._master_pose_recv_time = now
+        adapter._master_pose_recv_time = follow_start_time - 0.1
 
     assert adapter.get_takeover_action() is None
+
+
+def test_takeover_action_accepts_fresh_recv_time_with_skewed_master_timestamp():
+    adapter = X2RobotTakeoverTCPServer(
+        config=X2RobotTakeoverTCPConfig(takeover_delay_s=0.0, max_pose_age_s=1.0),
+        running_mode_getter=lambda: 2,
+        joint_snapshot_getter=lambda: np.zeros((2, 7), dtype=np.float32),
+    )
+    now = time.time()
+    left = np.arange(7, dtype=np.float32)
+    right = np.arange(7, 14, dtype=np.float32)
+    with adapter._state_lock:
+        adapter._current_mode = 2
+        adapter._follow_start_time = now - 0.5
+        adapter._min_pose_timestamp_us = int((now - 0.5) * 1e6)
+        adapter._master_pose_left = left
+        adapter._master_pose_right = right
+        adapter._master_pose_timestamp_us = int((now - 100.0) * 1e6)
+        adapter._master_pose_seq = 5
+        adapter._master_pose_recv_time = now
+
+    np.testing.assert_array_equal(
+        adapter.get_takeover_action(),
+        np.concatenate([left, right]).astype(np.float32),
+    )
 
 
 def test_takeover_action_accepts_fresh_pose_after_follow_gate():
@@ -312,7 +338,7 @@ def test_takeover_action_accepts_fresh_pose_after_follow_gate():
         adapter._master_pose_left = left
         adapter._master_pose_right = right
         adapter._master_pose_timestamp_us = int(now * 1e6)
-        adapter._master_pose_seq = 5
+        adapter._master_pose_seq = 6
         adapter._master_pose_recv_time = now
 
     np.testing.assert_array_equal(

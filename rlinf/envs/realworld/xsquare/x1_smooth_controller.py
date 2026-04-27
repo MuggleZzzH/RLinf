@@ -265,12 +265,12 @@ class X1SmoothController(Worker):
                 else curxyz2
             )
             currpy1 = (
-                0.5 * (currpy1 + self.last_expected_rpy1)
+                self._circular_midpoint(currpy1, self.last_expected_rpy1)
                 if self.last_expected_rpy1 is not None
                 else currpy1
             )
             currpy2 = (
-                0.5 * (currpy2 + self.last_expected_rpy2)
+                self._circular_midpoint(currpy2, self.last_expected_rpy2)
                 if self.last_expected_rpy2 is not None
                 else currpy2
             )
@@ -350,6 +350,12 @@ class X1SmoothController(Worker):
     @staticmethod
     def _shortest_angle_delta(current: np.ndarray, target: np.ndarray) -> np.ndarray:
         return X1SmoothController._normalize_angles(target - current)
+
+    @staticmethod
+    def _circular_midpoint(current: np.ndarray, target: np.ndarray) -> np.ndarray:
+        return X1SmoothController._normalize_angles(
+            current + 0.5 * X1SmoothController._shortest_angle_delta(current, target)
+        )
 
     def _log_pose_control(
         self,
