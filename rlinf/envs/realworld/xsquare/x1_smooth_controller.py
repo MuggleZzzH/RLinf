@@ -98,7 +98,7 @@ class X1SmoothController(Worker):
         tracemalloc.start(15)
         self.snapshot_base = tracemalloc.take_snapshot()
 
-    def state_callback(self, event):
+    def _update_state_from_controller(self):
         arms_data = self.controller.arms_data()
         self._state.follow1_pos = np.array(arms_data[0], dtype=np.float32)
         self._state.follow2_pos = np.array(arms_data[1], dtype=np.float32)
@@ -113,6 +113,10 @@ class X1SmoothController(Worker):
         self._state.lift = float(self.controller.lift_data())
         chassis_pose = self.controller.chassis_pose_data()
         self._state.car_pose = np.array(chassis_pose, dtype=np.float32)
+        return self._state
+
+    def state_callback(self, event):
+        self._update_state_from_controller()
 
     def get_state(self):
         return self._state
@@ -236,6 +240,21 @@ class X1SmoothController(Worker):
         )
         self.left_arm_target = left_arm_target
         self.right_arm_target = right_arm_target
+
+    def hold_current_pose(self):
+        state = self._update_state_from_controller()
+        left_pose = state.follow1_pos.astype(np.float32, copy=True)
+        right_pose = state.follow2_pos.astype(np.float32, copy=True)
+
+        self.left_arm_target = left_pose.tolist()
+        self.right_arm_target = right_pose.tolist()
+        self.last_expected_xyz1 = left_pose[:3].copy()
+        self.last_expected_xyz2 = right_pose[:3].copy()
+        self.last_expected_rpy1 = left_pose[3:6].copy()
+        self.last_expected_rpy2 = right_pose[3:6].copy()
+
+        self.controller.arms_control(self.left_arm_target, self.right_arm_target)
+        return state
 
     def reset_arms(self):
         self.left_arm_target = [0, 0, 0, 0, 0, 0, 0]

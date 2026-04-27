@@ -592,3 +592,16 @@ class X1Env(gym.Env):
         return np.stack(
             [self._x1_state.follow1_pos, self._x1_state.follow2_pos]
         ).astype(np.float32, copy=True)
+
+    def hold_current_pose_for_takeover(self) -> dict[str, np.ndarray]:
+        """Hard-hold current dual-arm pose before master takeover alignment."""
+        if not self.config.is_dummy:
+            self._x1_state = self._controller.hold_current_pose().wait()[0]
+        return {
+            "pose": np.stack(
+                [self._x1_state.follow1_pos, self._x1_state.follow2_pos]
+            ).astype(np.float32, copy=True),
+            "joint": np.stack(
+                [self._x1_state.follow1_joints, self._x1_state.follow2_joints]
+            ).astype(np.float32, copy=True),
+        }

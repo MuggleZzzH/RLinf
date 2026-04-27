@@ -99,6 +99,14 @@ class DummyTakeoverEnv(gym.Env):
     def get_arm_pose_snapshot(self):
         return self.pose_snapshot
 
+    def hold_current_pose_for_takeover(self):
+        if self.events is not None:
+            self.events.append("hard_hold")
+        return {
+            "pose": self.pose_snapshot.copy(),
+            "joint": self.joint_snapshot.copy(),
+        }
+
 
 def test_master_takeover_mode_1_passes_policy_action():
     env = DummyTakeoverEnv()
@@ -132,7 +140,19 @@ def test_master_takeover_mode_2_without_fresh_pose_holds_current_pose():
     assert not info["takeover_chunk_hold"]
     assert not info["intervene_flag"].item()
     assert "intervene_action" not in info
-    assert events == ["poll", "env_step", "sync"]
+    assert events == ["poll", "hard_hold", "sync", "env_step"]
+
+
+def test_master_takeover_first_sync_hold_hard_holds_before_sync():
+    events = []
+    env = DummyTakeoverEnv(events=events)
+    adapter = FakeTakeoverAdapter(states=[(True, None)], events=events)
+    wrapped = MasterTakeoverIntervention(env, adapter=adapter)
+
+    wrapped.step(np.ones(14, dtype=np.float32))
+
+    assert events.index("hard_hold") < events.index("sync")
+    assert events.index("sync") < events.index("env_step")
 
 
 def test_master_takeover_mode_2_fresh_pose_overrides_policy_action():

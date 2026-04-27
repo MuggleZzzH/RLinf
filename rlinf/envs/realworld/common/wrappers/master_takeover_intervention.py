@@ -130,9 +130,9 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
         step_start = time.time()
         new_action, replaced, chunk_holding, sync_holding, decision = self.action(action)
         action_selected_time = time.time()
-        obs, rew, done, truncated, info = self.env.step(new_action)
-        env_step_done_time = time.time()
+        pre_step_sync_done = False
         if sync_holding and self._takeover_sync_hold_steps == 1:
+            new_action = self._hard_hold_action()
             if self._slave_hold_settle_s > 0:
                 if self._debug_log:
                     self._logger.info(
@@ -140,7 +140,12 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
                         self._slave_hold_settle_s,
                     )
                 time.sleep(self._slave_hold_settle_s)
-        self.adapter.sync_control_plane()
+            self.adapter.sync_control_plane()
+            pre_step_sync_done = True
+        obs, rew, done, truncated, info = self.env.step(new_action)
+        env_step_done_time = time.time()
+        if not pre_step_sync_done:
+            self.adapter.sync_control_plane()
         control_plane_done_time = time.time()
         if self._debug_log and (
             self.adapter.is_takeover_active() or decision != "policy"
@@ -174,6 +179,22 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
         pose_snapshot = np.asarray(
             self.get_wrapper_attr("get_arm_pose_snapshot")(), dtype=np.float32
         )
+        return self._flatten_pose_snapshot(pose_snapshot)
+
+    def _hard_hold_action(self) -> np.ndarray:
+        try:
+            hold_snapshot = self.get_wrapper_attr("hold_current_pose_for_takeover")()
+        except AttributeError:
+            return self._hold_action()
+
+        if isinstance(hold_snapshot, Mapping):
+            pose_snapshot = hold_snapshot.get("pose")
+        else:
+            pose_snapshot = hold_snapshot
+        return self._flatten_pose_snapshot(np.asarray(pose_snapshot, dtype=np.float32))
+
+    @staticmethod
+    def _flatten_pose_snapshot(pose_snapshot: np.ndarray) -> np.ndarray:
         if pose_snapshot.shape != (2, 7):
             raise ValueError(
                 "Master takeover chunk-boundary recovery requires dual-arm pose "
