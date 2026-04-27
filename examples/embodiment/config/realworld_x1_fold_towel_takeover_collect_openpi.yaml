@@ -112,6 +112,7 @@ env:
       normal_mode_value: 1
       takeover_mode_value: 2
       takeover_delay_s: 4.0
+      slave_hold_settle_s: 0.5
       socket_timeout_s: 0.1
       accept_timeout_s: 0.1
       reconnect_sleep_s: 0.1

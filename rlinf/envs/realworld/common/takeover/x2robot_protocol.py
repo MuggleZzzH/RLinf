@@ -52,6 +52,7 @@ class X2RobotTakeoverTCPConfig:
     normal_mode_value: int = 1
     takeover_mode_value: int = 2
     takeover_delay_s: float = 4.0
+    slave_hold_settle_s: float = 0.0
     debug_log: bool = False
 
     @classmethod

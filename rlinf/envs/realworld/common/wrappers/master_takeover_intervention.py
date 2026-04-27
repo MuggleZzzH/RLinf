@@ -66,6 +66,10 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
             getattr(adapter_config, "debug_log", False)
             or (config is not None and bool(config.get("debug_log", False)))
         )
+        self._slave_hold_settle_s = float(
+            getattr(adapter_config, "slave_hold_settle_s", 0.0)
+            or (config.get("slave_hold_settle_s", 0.0) if config is not None else 0.0)
+        )
         self.adapter.start()
 
         self._chunk_active = False
@@ -128,6 +132,14 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
         action_selected_time = time.time()
         obs, rew, done, truncated, info = self.env.step(new_action)
         env_step_done_time = time.time()
+        if sync_holding and self._takeover_sync_hold_steps == 1:
+            if self._slave_hold_settle_s > 0:
+                if self._debug_log:
+                    self._logger.info(
+                        "X1 takeover wrapper settling slave hold before master sync: settle_s=%.3f",
+                        self._slave_hold_settle_s,
+                    )
+                time.sleep(self._slave_hold_settle_s)
         self.adapter.sync_control_plane()
         control_plane_done_time = time.time()
         if self._debug_log and (
