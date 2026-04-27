@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -59,43 +60,90 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
                 logger=logging.getLogger(__name__),
             )
         self.adapter = adapter
+        self._logger = logging.getLogger(__name__)
+        adapter_config = getattr(adapter, "config", None)
+        self._debug_log = bool(
+            getattr(adapter_config, "debug_log", False)
+            or (config is not None and bool(config.get("debug_log", False)))
+        )
         self.adapter.start()
 
         self._chunk_active = False
         self._hold_until_chunk_end = False
         self._was_takeover_active = self.adapter.is_takeover_active()
+        self._chunk_step_index = 0
+        self._takeover_sync_hold_steps = 0
 
     def begin_action_chunk(self) -> None:
         self._chunk_active = True
         self._hold_until_chunk_end = False
+        self._chunk_step_index = 0
 
     def end_action_chunk(self) -> None:
         self._chunk_active = False
         self._hold_until_chunk_end = False
 
-    def action(self, action: np.ndarray) -> tuple[np.ndarray, bool, bool, bool]:
+    def action(self, action: np.ndarray) -> tuple[np.ndarray, bool, bool, bool, str]:
         self.adapter.poll()
         takeover_active = self.adapter.is_takeover_active()
         if self._chunk_active and self._was_takeover_active and not takeover_active:
             self._hold_until_chunk_end = True
+            if self._debug_log:
+                self._logger.info(
+                    "X1 takeover wrapper mode exit inside chunk: chunk_step=%s; holding until boundary",
+                    self._chunk_step_index,
+                )
+        if takeover_active and not self._was_takeover_active:
+            self._takeover_sync_hold_steps = 0
+            if self._debug_log:
+                self._logger.info(
+                    "X1 takeover wrapper mode enter: chunk_active=%s chunk_step=%s; policy actions will be blocked until fresh master pose",
+                    self._chunk_active,
+                    self._chunk_step_index,
+                )
         self._was_takeover_active = takeover_active
 
         expert_action = self.adapter.get_takeover_action()
         if expert_action is not None:
-            return expert_action.astype(np.float32, copy=False), True, False, False
+            return (
+                expert_action.astype(np.float32, copy=False),
+                True,
+                False,
+                False,
+                "expert",
+            )
 
         if takeover_active:
-            return self._hold_action(), False, False, True
+            self._takeover_sync_hold_steps += 1
+            return self._hold_action(), False, False, True, "sync_hold"
 
         if self._hold_until_chunk_end:
-            return self._hold_action(), False, True, False
+            return self._hold_action(), False, True, False, "chunk_hold"
 
-        return action, False, False, False
+        return action, False, False, False, "policy"
 
     def step(self, action):
-        new_action, replaced, chunk_holding, sync_holding = self.action(action)
+        step_start = time.time()
+        new_action, replaced, chunk_holding, sync_holding, decision = self.action(action)
+        action_selected_time = time.time()
         obs, rew, done, truncated, info = self.env.step(new_action)
+        env_step_done_time = time.time()
         self.adapter.sync_control_plane()
+        control_plane_done_time = time.time()
+        if self._debug_log and (
+            self.adapter.is_takeover_active() or decision != "policy"
+        ):
+            self._logger.info(
+                "X1 takeover wrapper step: decision=%s chunk_step=%s sync_hold_steps=%s selected_dt=%.4f env_dt=%.4f sync_dt=%.4f action=%s",
+                decision,
+                self._chunk_step_index,
+                self._takeover_sync_hold_steps,
+                action_selected_time - step_start,
+                env_step_done_time - action_selected_time,
+                control_plane_done_time - env_step_done_time,
+                np.array2string(np.asarray(new_action), precision=4, threshold=20),
+            )
+        self._chunk_step_index += 1
         info["executed_action"] = new_action
         info["intervene_flag"] = np.asarray([replaced], dtype=bool)
         if replaced:

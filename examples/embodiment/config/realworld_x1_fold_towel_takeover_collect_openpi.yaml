@@ -115,6 +115,7 @@ env:
       socket_timeout_s: 0.1
       accept_timeout_s: 0.1
       reconnect_sleep_s: 0.1
+      debug_log: True
     override_cfg:
       task_description: "fold the towel"
       use_arm_ids: [0, 1]

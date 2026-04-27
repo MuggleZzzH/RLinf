@@ -52,6 +52,7 @@ class X2RobotTakeoverTCPConfig:
     normal_mode_value: int = 1
     takeover_mode_value: int = 2
     takeover_delay_s: float = 4.0
+    debug_log: bool = False
 
     @classmethod
     def from_dict(
@@ -258,6 +259,7 @@ class X2RobotTakeoverTCPServer:
         running_mode = int(self._running_mode_getter())
         with self._state_lock:
             if running_mode != self._current_mode:
+                old_mode = self._current_mode
                 self._current_mode = running_mode
                 self._mode_dirty = True
                 self._master_pose_left = None
@@ -266,6 +268,13 @@ class X2RobotTakeoverTCPServer:
                 self._follow_start_time = None
                 self._min_pose_timestamp_us = 0
                 self._snapshot_dirty = running_mode == self.config.takeover_mode_value
+                if self.config.debug_log:
+                    self._logger.info(
+                        "X1 takeover protocol mode change: %s -> %s, snapshot_dirty=%s",
+                        old_mode,
+                        running_mode,
+                        self._snapshot_dirty,
+                    )
 
     def sync_control_plane(self) -> None:
         self._sync_control_plane()
@@ -390,6 +399,12 @@ class X2RobotTakeoverTCPServer:
 
         def send_mode() -> bool:
             try:
+                if self.config.debug_log:
+                    self._logger.info(
+                        "X1 takeover protocol send MSG_MODE: mode=%s t=%.6f",
+                        current_mode,
+                        time.time(),
+                    )
                 send_frame(
                     client_socket,
                     {
@@ -403,7 +418,7 @@ class X2RobotTakeoverTCPServer:
                 return False
             return True
 
-        def send_joint_snapshot() -> bool:
+        def send_joint_snapshot(phase: str) -> bool:
             joint_snapshot = np.asarray(self._joint_snapshot_getter(), dtype=np.float32)
             if joint_snapshot.shape != (2, 7):
                 self._logger.warning(
@@ -413,6 +428,14 @@ class X2RobotTakeoverTCPServer:
                 return False
 
             try:
+                if self.config.debug_log:
+                    self._logger.info(
+                        "X1 takeover protocol send MSG_JOINT[%s]: t=%.6f left=%s right=%s",
+                        phase,
+                        time.time(),
+                        np.array2string(joint_snapshot[0], precision=4),
+                        np.array2string(joint_snapshot[1], precision=4),
+                    )
                 send_frame(
                     client_socket,
                     {
@@ -434,14 +457,14 @@ class X2RobotTakeoverTCPServer:
             # threads. Send the fresh joint snapshot before the mode transition so
             # the master cannot align to a stale cached snapshot. Send it once more
             # after mode for clients that clear joint caches on mode transitions.
-            if not send_joint_snapshot():
+            if not send_joint_snapshot("pre_mode"):
                 return
             if mode_dirty:
                 if not send_mode():
                     return
                 with self._state_lock:
                     self._mode_dirty = False
-                if not send_joint_snapshot():
+                if not send_joint_snapshot("post_mode"):
                     return
 
             now = time.time()
@@ -452,6 +475,13 @@ class X2RobotTakeoverTCPServer:
                 self._master_pose_timestamp_us = 0
                 self._follow_start_time = now + self.config.takeover_delay_s
                 self._min_pose_timestamp_us = int(self._follow_start_time * 1e6)
+                if self.config.debug_log:
+                    self._logger.info(
+                        "X1 takeover protocol waiting for fresh master pose: now=%.6f follow_start=%.6f delay=%.3f",
+                        now,
+                        self._follow_start_time,
+                        self.config.takeover_delay_s,
+                    )
             return
 
         if mode_dirty:
