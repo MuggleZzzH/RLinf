@@ -41,6 +41,8 @@ class X1RobotConfig:
     use_dense_reward: bool = False
     step_frequency: float = 10.0  # Max number of steps per second
     smooth_frequency: int = 50  # Frequency for smooth controller
+    debug_gripper_control: bool = False
+    gripper_target_tolerance: float = 0.05
 
     # Positions are stored in eular angles (xyz for position, rzryrx for orientation)
     # It will be converted to quaternions internally
@@ -150,6 +152,8 @@ class X1Env(gym.Env):
             env_idx=self.env_idx,
             node_rank=self.node_rank,
             worker_rank=self.env_worker_rank,
+            debug_gripper_control=self.config.debug_gripper_control,
+            gripper_target_tolerance=self.config.gripper_target_tolerance,
         )
 
     def _init_action_obs_spaces(self):

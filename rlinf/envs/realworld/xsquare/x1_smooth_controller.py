@@ -42,6 +42,8 @@ class X1SmoothController(Worker):
         env_idx: int = 0,
         node_rank: int = 0,
         worker_rank: int = 0,
+        debug_gripper_control: bool = False,
+        gripper_target_tolerance: float = 0.05,
     ):
         """Launch a X1SmoothController on the specified worker's node.
 
@@ -55,13 +57,20 @@ class X1SmoothController(Worker):
         """
         cluster = Cluster()
         placement = NodePlacementStrategy(node_ranks=[node_rank])
-        return X1SmoothController.create_group(freq).launch(
+        return X1SmoothController.create_group(
+            freq, debug_gripper_control, gripper_target_tolerance
+        ).launch(
             cluster=cluster,
             placement_strategy=placement,
             name=f"X1SmoothController-{worker_rank}-{env_idx}",
         )
 
-    def __init__(self, freq=50):
+    def __init__(
+        self,
+        freq=50,
+        debug_gripper_control: bool = False,
+        gripper_target_tolerance: float = 0.05,
+    ):
         super().__init__()
         self._logger = get_logger()
         # FIXME: should move to roscontroller
@@ -85,8 +94,10 @@ class X1SmoothController(Worker):
         self.last_expected_rpy1 = None
         self.last_expected_rpy2 = None
 
-        # xyz, rpy, gripper
-        self.tol = [0.002, 0.005, 5]  # m, rad, cm
+        self.xyz_target_tolerance = 0.002  # m
+        self.rpy_target_tolerance = 0.005  # rad
+        self.gripper_target_tolerance = float(gripper_target_tolerance)
+        self.debug_gripper_control = bool(debug_gripper_control)
         self.xyz_speed = 0.5  # m/s
         self.rpy_speed = 1.5  # rad/s
         self.freq = freq
@@ -149,17 +160,69 @@ class X1SmoothController(Worker):
         errrpy1 = np.linalg.norm(currpy1 - targetrpy1)
         errrpy2 = np.linalg.norm(currpy2 - targetrpy2)
 
-        if (
-            errxyz1 < self.tol[0]
-            and errxyz2 < self.tol[0]
-            and errrpy1 < self.tol[1]
-            and errrpy2 < self.tol[1]
-        ):
+        curgrip1 = float(self._state.follow1_pos[6])
+        curgrip2 = float(self._state.follow2_pos[6])
+        targetgrip1 = float(self.left_arm_target[6])
+        targetgrip2 = float(self.right_arm_target[6])
+        errgrip1 = abs(curgrip1 - targetgrip1)
+        errgrip2 = abs(curgrip2 - targetgrip2)
+
+        pose_reached = (
+            errxyz1 < self.xyz_target_tolerance
+            and errxyz2 < self.xyz_target_tolerance
+            and errrpy1 < self.rpy_target_tolerance
+            and errrpy2 < self.rpy_target_tolerance
+        )
+        gripper_reached = (
+            errgrip1 < self.gripper_target_tolerance
+            and errgrip2 < self.gripper_target_tolerance
+        )
+
+        if pose_reached and gripper_reached:
             # print(f"[INFO] target reach! {errxyz1:.4f}, {errxyz2:.4f}, {errrpy1:.4f}, {errrpy2:.4f}")
             self.last_expected_xyz1 = curxyz1.copy()
             self.last_expected_xyz2 = curxyz2.copy()
             self.last_expected_rpy1 = currpy1.copy()
             self.last_expected_rpy2 = currpy2.copy()
+            self._log_gripper_control(
+                "reached",
+                (curgrip1, curgrip2),
+                (targetgrip1, targetgrip2),
+                (errgrip1, errgrip2),
+                published=False,
+            )
+            return
+        if pose_reached:
+            self.last_expected_xyz1 = curxyz1.copy()
+            self.last_expected_xyz2 = curxyz2.copy()
+            self.last_expected_rpy1 = currpy1.copy()
+            self.last_expected_rpy2 = currpy2.copy()
+            newpos1 = [
+                curxyz1[0],
+                curxyz1[1],
+                curxyz1[2],
+                currpy1[0],
+                currpy1[1],
+                currpy1[2],
+                targetgrip1,
+            ]
+            newpos2 = [
+                curxyz2[0],
+                curxyz2[1],
+                curxyz2[2],
+                currpy2[0],
+                currpy2[1],
+                currpy2[2],
+                targetgrip2,
+            ]
+            self.controller.arms_control(newpos1, newpos2)
+            self._log_gripper_control(
+                "gripper_only",
+                (curgrip1, curgrip2),
+                (targetgrip1, targetgrip2),
+                (errgrip1, errgrip2),
+                published=True,
+            )
             return
         else:
             # interpolate xyz
@@ -229,7 +292,41 @@ class X1SmoothController(Worker):
             ]
             # print("new pos:",newpos2)
             self.controller.arms_control(newpos1, newpos2)
+            self._log_gripper_control(
+                "pose_tracking",
+                (curgrip1, curgrip2),
+                (targetgrip1, targetgrip2),
+                (errgrip1, errgrip2),
+                published=True,
+            )
             # time.sleep(0.2 / self.freq)
+
+    def _log_gripper_control(
+        self,
+        decision: str,
+        current: tuple[float, float],
+        target: tuple[float, float],
+        error: tuple[float, float],
+        published: bool,
+    ) -> None:
+        if not self.debug_gripper_control:
+            return
+        rospy.loginfo_throttle(
+            1.0,
+            (
+                "X1 gripper control[%s]: current=(%.4f, %.4f) "
+                "target=(%.4f, %.4f) err=(%.4f, %.4f) tol=%.4f published=%s"
+            ),
+            decision,
+            current[0],
+            current[1],
+            target[0],
+            target[1],
+            error[0],
+            error[1],
+            self.gripper_target_tolerance,
+            published,
+        )
 
     def move_arm(self, left_arm_target, right_arm_target):
         assert isinstance(left_arm_target, list) and len(left_arm_target) == 7, (

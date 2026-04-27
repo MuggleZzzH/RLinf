@@ -127,6 +127,21 @@ class X1DeployEnv(X1Env):
         )
         next_position1 = next_position[0]
         next_position2 = next_position[1]
+        if self.config.debug_gripper_control:
+            now = time.time()
+            last_log_time = getattr(self, "_last_gripper_debug_log_time", 0.0)
+            if now - last_log_time >= 1.0:
+                self._last_gripper_debug_log_time = now
+                self._logger.info(
+                    "X1 absolute pose gripper target: action=(%.4f, %.4f) "
+                    "target=(%.4f, %.4f) current=(%.4f, %.4f)",
+                    float(action[0, 6]),
+                    float(action[-1, 6]),
+                    float(next_position1[6]),
+                    float(next_position2[6]),
+                    float(self._x1_state.follow1_pos[6]),
+                    float(self._x1_state.follow2_pos[6]),
+                )
 
         if not self.config.is_dummy:
             self._controller.move_arm(
