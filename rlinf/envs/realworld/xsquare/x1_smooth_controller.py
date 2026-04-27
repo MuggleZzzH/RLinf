@@ -42,6 +42,7 @@ class X1SmoothController(Worker):
         env_idx: int = 0,
         node_rank: int = 0,
         worker_rank: int = 0,
+        debug_pose_control: bool = False,
         debug_gripper_control: bool = False,
         gripper_target_tolerance: float = 0.05,
     ):
@@ -58,7 +59,10 @@ class X1SmoothController(Worker):
         cluster = Cluster()
         placement = NodePlacementStrategy(node_ranks=[node_rank])
         return X1SmoothController.create_group(
-            freq, debug_gripper_control, gripper_target_tolerance
+            freq,
+            debug_pose_control,
+            debug_gripper_control,
+            gripper_target_tolerance,
         ).launch(
             cluster=cluster,
             placement_strategy=placement,
@@ -68,6 +72,7 @@ class X1SmoothController(Worker):
     def __init__(
         self,
         freq=50,
+        debug_pose_control: bool = False,
         debug_gripper_control: bool = False,
         gripper_target_tolerance: float = 0.05,
     ):
@@ -97,6 +102,7 @@ class X1SmoothController(Worker):
         self.xyz_target_tolerance = 0.002  # m
         self.rpy_target_tolerance = 0.005  # rad
         self.gripper_target_tolerance = float(gripper_target_tolerance)
+        self.debug_pose_control = bool(debug_pose_control)
         self.debug_gripper_control = bool(debug_gripper_control)
         self.xyz_speed = 0.5  # m/s
         self.rpy_speed = 1.5  # rad/s
@@ -157,8 +163,10 @@ class X1SmoothController(Worker):
         targetrpy2 = np.array(self.right_arm_target[3:6], dtype=float)
         # print("target rpy:")
         # print(targetrpy1, targetrpy2)
-        errrpy1 = np.linalg.norm(currpy1 - targetrpy1)
-        errrpy2 = np.linalg.norm(currpy2 - targetrpy2)
+        rpy_delta1 = self._shortest_angle_delta(currpy1, targetrpy1)
+        rpy_delta2 = self._shortest_angle_delta(currpy2, targetrpy2)
+        errrpy1 = np.linalg.norm(rpy_delta1)
+        errrpy2 = np.linalg.norm(rpy_delta2)
 
         curgrip1 = float(self._state.follow1_pos[6])
         curgrip2 = float(self._state.follow2_pos[6])
@@ -191,6 +199,16 @@ class X1SmoothController(Worker):
                 (errgrip1, errgrip2),
                 published=False,
             )
+            self._log_pose_control(
+                "reached",
+                (curxyz1, curxyz2),
+                (targetxyz1, targetxyz2),
+                (errxyz1, errxyz2),
+                (currpy1, currpy2),
+                (targetrpy1, targetrpy2),
+                (errrpy1, errrpy2),
+                published=False,
+            )
             return
         if pose_reached:
             self.last_expected_xyz1 = curxyz1.copy()
@@ -221,6 +239,16 @@ class X1SmoothController(Worker):
                 (curgrip1, curgrip2),
                 (targetgrip1, targetgrip2),
                 (errgrip1, errgrip2),
+                published=True,
+            )
+            self._log_pose_control(
+                "gripper_only",
+                (curxyz1, curxyz2),
+                (targetxyz1, targetxyz2),
+                (errxyz1, errxyz2),
+                (currpy1, currpy2),
+                (targetrpy1, targetrpy2),
+                (errrpy1, errrpy2),
                 published=True,
             )
             return
@@ -259,16 +287,20 @@ class X1SmoothController(Worker):
             newxyz2 = curxyz2 + stepxyz2
             self.last_expected_xyz2 = newxyz2.copy()
 
-            # interpolate rpy
-            dirrpy1 = (targetrpy1 - currpy1) / (errrpy1 + 0.001)
-            dirrpy2 = (targetrpy2 - currpy2) / (errrpy2 + 0.001)
+            # interpolate rpy along the shortest angular path across +/-pi
+            rpy_delta1 = self._shortest_angle_delta(currpy1, targetrpy1)
+            rpy_delta2 = self._shortest_angle_delta(currpy2, targetrpy2)
+            errrpy1 = np.linalg.norm(rpy_delta1)
+            errrpy2 = np.linalg.norm(rpy_delta2)
+            dirrpy1 = rpy_delta1 / (errrpy1 + 0.001)
+            dirrpy2 = rpy_delta2 / (errrpy2 + 0.001)
             # print("dirrpy2:",dirrpy2)
             steprpy1 = dirrpy1 * min(rpy_step, errrpy1)
             steprpy2 = dirrpy2 * min(rpy_step, errrpy2)
-            newrpy1 = currpy1 + steprpy1
+            newrpy1 = self._normalize_angles(currpy1 + steprpy1)
             self.last_expected_rpy1 = newrpy1.copy()
 
-            newrpy2 = currpy2 + steprpy2
+            newrpy2 = self._normalize_angles(currpy2 + steprpy2)
             # print("last_exp:", self.last_expected_rpy2, "; stp:", steprpy2)
             self.last_expected_rpy2 = newrpy2.copy()
 
@@ -299,7 +331,61 @@ class X1SmoothController(Worker):
                 (errgrip1, errgrip2),
                 published=True,
             )
+            self._log_pose_control(
+                "pose_tracking",
+                (curxyz1, curxyz2),
+                (targetxyz1, targetxyz2),
+                (errxyz1, errxyz2),
+                (currpy1, currpy2),
+                (targetrpy1, targetrpy2),
+                (errrpy1, errrpy2),
+                published=True,
+            )
             # time.sleep(0.2 / self.freq)
+
+    @staticmethod
+    def _normalize_angles(angles: np.ndarray) -> np.ndarray:
+        return (angles + np.pi) % (2 * np.pi) - np.pi
+
+    @staticmethod
+    def _shortest_angle_delta(current: np.ndarray, target: np.ndarray) -> np.ndarray:
+        return X1SmoothController._normalize_angles(target - current)
+
+    def _log_pose_control(
+        self,
+        decision: str,
+        current_xyz: tuple[np.ndarray, np.ndarray],
+        target_xyz: tuple[np.ndarray, np.ndarray],
+        error_xyz: tuple[float, float],
+        current_rpy: tuple[np.ndarray, np.ndarray],
+        target_rpy: tuple[np.ndarray, np.ndarray],
+        error_rpy: tuple[float, float],
+        published: bool,
+    ) -> None:
+        if not self.debug_pose_control:
+            return
+        rospy.loginfo_throttle(
+            1.0,
+            (
+                "X1 pose control[%s]: xyz_cur=(%s, %s) xyz_tgt=(%s, %s) "
+                "xyz_err=(%.4f, %.4f) rpy_cur=(%s, %s) rpy_tgt=(%s, %s) "
+                "rpy_err=(%.4f, %.4f) published=%s"
+            ),
+            decision,
+            np.array2string(current_xyz[0], precision=4),
+            np.array2string(current_xyz[1], precision=4),
+            np.array2string(target_xyz[0], precision=4),
+            np.array2string(target_xyz[1], precision=4),
+            error_xyz[0],
+            error_xyz[1],
+            np.array2string(current_rpy[0], precision=4),
+            np.array2string(current_rpy[1], precision=4),
+            np.array2string(target_rpy[0], precision=4),
+            np.array2string(target_rpy[1], precision=4),
+            error_rpy[0],
+            error_rpy[1],
+            published,
+        )
 
     def _log_gripper_control(
         self,

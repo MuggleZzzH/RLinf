@@ -16,6 +16,7 @@ import sys
 import types
 from pathlib import Path
 
+import numpy as np
 import pytest
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
@@ -43,6 +44,7 @@ def test_x1_fold_towel_dagger_config_composes(monkeypatch):
     assert cfg.actor.model.num_action_chunks == 30
     assert cfg.env.train.use_master_takeover is True
     assert cfg.env.train.master_takeover.port == 8766
+    assert cfg.env.train.master_takeover.max_pose_age_s == 0.25
     assert cfg.env.train.data_collection.save_dir == "../results/x1_dagger_rollouts"
     assert cfg.env.train.data_collection.export_format == "lerobot"
     assert cfg.env.train.data_collection.only_success is True
@@ -67,6 +69,7 @@ def test_x1_fold_towel_takeover_collect_config_composes(monkeypatch):
     assert cfg.env.eval.use_master_takeover is True
     assert cfg.env.eval.action_mode == "absolute_pose"
     assert cfg.env.eval.master_takeover.port == 8766
+    assert cfg.env.eval.master_takeover.max_pose_age_s == 0.25
     assert cfg.env.eval.keyboard_reward_wrapper == "single_stage"
     assert cfg.env.eval.data_collection.enabled is True
     assert cfg.env.eval.data_collection.export_format == "lerobot"
@@ -83,3 +86,32 @@ def test_x1_deploy_config_rejects_single_arm_use_arm_ids():
 
     with pytest.raises(ValueError, match=r"use_arm_ids=\[0, 1\]"):
         X1DeployEnvConfig(use_arm_ids=[1])
+
+
+def test_x1_absolute_pose_step_returns_post_clip_executed_action():
+    sys.modules.setdefault("cv2", types.ModuleType("cv2"))
+    from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnv
+
+    env = X1DeployEnv(
+        {
+            "is_dummy": True,
+            "use_arm_ids": [0, 1],
+            "use_camera_ids": [2],
+            "enforce_gripper_close": False,
+            "ee_pose_limit_min": [[-0.1] * 6, [-0.2] * 6],
+            "ee_pose_limit_max": [[0.1] * 6, [0.2] * 6],
+            "gripper_width_limit_min": 0.0,
+            "gripper_width_limit_max": 1.0,
+        }
+    )
+
+    action = np.array([0.3] * 6 + [2.0] + [-0.3] * 6 + [-1.0], dtype=np.float32)
+    _, _, _, _, info = env.step_absolute_pose(action)
+
+    assert info["action_clipped"] is True
+    assert info["clip_delta_max"] > 0.0
+    np.testing.assert_array_equal(info["raw_action"], action)
+    np.testing.assert_allclose(info["executed_action"][:6], np.full(6, 0.1))
+    assert info["executed_action"][6] == 1.0
+    np.testing.assert_allclose(info["executed_action"][7:13], np.full(6, -0.2))
+    assert info["executed_action"][13] == 0.0

@@ -122,6 +122,7 @@ env:
       takeover_mode_value: 2
       takeover_delay_s: 4.0
       slave_hold_settle_s: 0.5
+      max_pose_age_s: 0.25
       socket_timeout_s: 0.1
       accept_timeout_s: 0.1
       reconnect_sleep_s: 0.1
@@ -131,6 +132,8 @@ env:
       use_arm_ids: [0, 1]
       use_camera_ids: [0, 1, 2]
       enforce_gripper_close: false
+      debug_pose_control: false
+      debug_gripper_control: false
       reset_ee_pose:
         - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]
         - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]

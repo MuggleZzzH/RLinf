@@ -87,6 +87,7 @@ def _make_controller(
     controller.xyz_target_tolerance = 0.002
     controller.rpy_target_tolerance = 0.005
     controller.gripper_target_tolerance = gripper_tolerance
+    controller.debug_pose_control = False
     controller.debug_gripper_control = False
     controller.xyz_speed = 0.5
     controller.rpy_speed = 1.5
@@ -149,3 +150,15 @@ def test_smooth_controller_pose_tracking_keeps_target_gripper(monkeypatch):
     assert 0.0 < right_cmd[0] <= 0.2
     assert left_cmd[6] == 1.0
     assert right_cmd[6] == 2.0
+
+
+def test_smooth_controller_uses_shortest_rpy_delta(monkeypatch):
+    controller_cls = _load_controller_class(monkeypatch)
+
+    delta = controller_cls._shortest_angle_delta(
+        np.array([-3.13], dtype=np.float32),
+        np.array([3.13], dtype=np.float32),
+    )
+
+    assert delta[0] < 0
+    assert abs(delta[0]) < 0.1

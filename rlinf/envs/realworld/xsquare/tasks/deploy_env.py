@@ -104,12 +104,13 @@ class X1DeployEnv(X1Env):
         )
 
         start_time = time.time()
+        raw_action = np.asarray(action, dtype=np.float32).reshape(-1).copy()
 
         action = np.clip(
-            action,
+            raw_action,
             self._absolute_pose_action_space.low,
             self._absolute_pose_action_space.high,
-        )
+        ).astype(np.float32, copy=False)
         action = action.reshape(-1, 7)
         next_positions = {
             0: self._x1_state.follow1_pos.copy(),
@@ -125,23 +126,42 @@ class X1DeployEnv(X1Env):
         next_position = self._clip_position_to_safety_box(
             np.stack([next_positions[0], next_positions[1]])
         )
+        next_position = next_position.astype(np.float32, copy=False)
+        executed_action = next_position.reshape(-1).copy()
+        clip_delta = np.abs(executed_action - raw_action)
+        clip_delta_max = float(np.max(clip_delta)) if clip_delta.size else 0.0
+        action_clipped = bool(clip_delta_max > 1e-6)
         next_position1 = next_position[0]
         next_position2 = next_position[1]
-        if self.config.debug_gripper_control:
+        if self.config.debug_gripper_control or self.config.debug_pose_control:
             now = time.time()
-            last_log_time = getattr(self, "_last_gripper_debug_log_time", 0.0)
+            last_log_time = getattr(self, "_last_pose_debug_log_time", 0.0)
             if now - last_log_time >= 1.0:
-                self._last_gripper_debug_log_time = now
+                self._last_pose_debug_log_time = now
                 self._logger.info(
-                    "X1 absolute pose gripper target: action=(%.4f, %.4f) "
-                    "target=(%.4f, %.4f) current=(%.4f, %.4f)",
-                    float(action[0, 6]),
-                    float(action[-1, 6]),
-                    float(next_position1[6]),
-                    float(next_position2[6]),
-                    float(self._x1_state.follow1_pos[6]),
-                    float(self._x1_state.follow2_pos[6]),
+                    "X1 absolute pose target: raw_left=%s raw_right=%s "
+                    "executed_left=%s executed_right=%s current_left=%s "
+                    "current_right=%s clipped=%s clip_delta_max=%.6f",
+                    np.array2string(raw_action[:7], precision=4),
+                    np.array2string(raw_action[7:], precision=4),
+                    np.array2string(executed_action[:7], precision=4),
+                    np.array2string(executed_action[7:], precision=4),
+                    np.array2string(self._x1_state.follow1_pos, precision=4),
+                    np.array2string(self._x1_state.follow2_pos, precision=4),
+                    action_clipped,
+                    clip_delta_max,
                 )
+                if self.config.debug_gripper_control:
+                    self._logger.info(
+                        "X1 absolute pose gripper target: action=(%.4f, %.4f) "
+                        "target=(%.4f, %.4f) current=(%.4f, %.4f)",
+                        float(action[0, 6]),
+                        float(action[-1, 6]),
+                        float(next_position1[6]),
+                        float(next_position2[6]),
+                        float(self._x1_state.follow1_pos[6]),
+                        float(self._x1_state.follow2_pos[6]),
+                    )
 
         if not self.config.is_dummy:
             self._controller.move_arm(
@@ -161,7 +181,13 @@ class X1DeployEnv(X1Env):
         reward = self._calc_step_reward(observation)
         terminated = False
         truncated = self._num_steps >= self.config.max_num_steps
-        return observation, reward, terminated, truncated, {}
+        info = {
+            "raw_action": raw_action,
+            "executed_action": executed_action,
+            "action_clipped": action_clipped,
+            "clip_delta_max": clip_delta_max,
+        }
+        return observation, reward, terminated, truncated, info
 
     def step_relative_pose(self, action: np.ndarray):
         return super().step(action)

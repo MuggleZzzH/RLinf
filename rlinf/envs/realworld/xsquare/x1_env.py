@@ -41,6 +41,7 @@ class X1RobotConfig:
     use_dense_reward: bool = False
     step_frequency: float = 10.0  # Max number of steps per second
     smooth_frequency: int = 50  # Frequency for smooth controller
+    debug_pose_control: bool = False
     debug_gripper_control: bool = False
     gripper_target_tolerance: float = 0.05
 
@@ -152,6 +153,7 @@ class X1Env(gym.Env):
             env_idx=self.env_idx,
             node_rank=self.node_rank,
             worker_rank=self.env_worker_rank,
+            debug_pose_control=self.config.debug_pose_control,
             debug_gripper_control=self.config.debug_gripper_control,
             gripper_target_tolerance=self.config.gripper_target_tolerance,
         )

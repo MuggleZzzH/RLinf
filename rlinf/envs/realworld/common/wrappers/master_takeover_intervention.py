@@ -147,11 +147,14 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
         if not pre_step_sync_done:
             self.adapter.sync_control_plane()
         control_plane_done_time = time.time()
+        executed_action = np.asarray(
+            info.get("executed_action", new_action), dtype=np.float32
+        )
         if self._debug_log and (
             self.adapter.is_takeover_active() or decision != "policy"
         ):
             self._logger.info(
-                "X1 takeover wrapper step: decision=%s chunk_step=%s sync_hold_steps=%s selected_dt=%.4f env_dt=%.4f sync_dt=%.4f action=%s",
+                "X1 takeover wrapper step: decision=%s chunk_step=%s sync_hold_steps=%s selected_dt=%.4f env_dt=%.4f sync_dt=%.4f action=%s executed=%s",
                 decision,
                 self._chunk_step_index,
                 self._takeover_sync_hold_steps,
@@ -159,12 +162,13 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
                 env_step_done_time - action_selected_time,
                 control_plane_done_time - env_step_done_time,
                 np.array2string(np.asarray(new_action), precision=4, threshold=20),
+                np.array2string(executed_action, precision=4, threshold=20),
             )
         self._chunk_step_index += 1
-        info["executed_action"] = new_action
+        info["executed_action"] = executed_action
         info["intervene_flag"] = np.asarray([replaced], dtype=bool)
         if replaced:
-            info["intervene_action"] = new_action
+            info["intervene_action"] = executed_action
         info["takeover_active"] = self.adapter.is_takeover_active()
         info["takeover_chunk_hold"] = chunk_holding
         info["takeover_sync_hold"] = sync_holding

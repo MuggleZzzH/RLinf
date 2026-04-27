@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import socket
+import time
 
 import gymnasium as gym
 import numpy as np
@@ -74,7 +75,7 @@ class FakeTakeoverAdapter:
 
 
 class DummyTakeoverEnv(gym.Env):
-    def __init__(self, joint_shape=(2, 7), events=None):
+    def __init__(self, joint_shape=(2, 7), events=None, executed_action=None):
         self.action_space = gym.spaces.Box(-10.0, 10.0, shape=(14,), dtype=np.float32)
         self.observation_space = gym.spaces.Box(
             -10.0, 10.0, shape=(14,), dtype=np.float32
@@ -83,12 +84,18 @@ class DummyTakeoverEnv(gym.Env):
         self.joint_snapshot = np.zeros(joint_shape, dtype=np.float32)
         self.pose_snapshot = np.arange(14, dtype=np.float32).reshape(2, 7)
         self.events = events
+        self.executed_action = executed_action
 
     def step(self, action):
         if self.events is not None:
             self.events.append("env_step")
         self.last_action = np.asarray(action, dtype=np.float32)
-        return np.zeros(14, dtype=np.float32), 0.0, False, False, {}
+        info = {}
+        if self.executed_action is not None:
+            info["executed_action"] = np.asarray(
+                self.executed_action, dtype=np.float32
+            )
+        return np.zeros(14, dtype=np.float32), 0.0, False, False, info
 
     def reset(self, *, seed=None, options=None):
         return np.zeros(14, dtype=np.float32), {}
@@ -170,6 +177,22 @@ def test_master_takeover_mode_2_fresh_pose_overrides_policy_action():
     assert info["intervene_flag"].item()
 
 
+def test_master_takeover_records_post_clip_executed_action_as_expert():
+    expert = np.arange(14, dtype=np.float32)
+    executed = expert.copy()
+    executed[0] = 0.25
+    env = DummyTakeoverEnv(executed_action=executed)
+    adapter = FakeTakeoverAdapter(states=[(True, expert)])
+    wrapped = MasterTakeoverIntervention(env, adapter=adapter)
+
+    _, _, _, _, info = wrapped.step(np.ones(14, dtype=np.float32))
+
+    np.testing.assert_array_equal(env.last_action, expert)
+    np.testing.assert_array_equal(info["executed_action"], executed)
+    np.testing.assert_array_equal(info["intervene_action"], executed)
+    assert info["intervene_flag"].item()
+
+
 def test_master_takeover_holds_after_takeover_until_chunk_boundary():
     env = DummyTakeoverEnv()
     expert = np.full(14, 3.0, dtype=np.float32)
@@ -231,3 +254,68 @@ def test_takeover_control_plane_sends_joint_before_mode_on_takeover():
     finally:
         client_sock.close()
         server_sock.close()
+
+
+def test_takeover_action_rejects_stale_pose_receive_time():
+    adapter = X2RobotTakeoverTCPServer(
+        config=X2RobotTakeoverTCPConfig(takeover_delay_s=0.0, max_pose_age_s=0.01),
+        running_mode_getter=lambda: 2,
+        joint_snapshot_getter=lambda: np.zeros((2, 7), dtype=np.float32),
+    )
+    now = time.time()
+    with adapter._state_lock:
+        adapter._current_mode = 2
+        adapter._follow_start_time = now - 1.0
+        adapter._min_pose_timestamp_us = 0
+        adapter._master_pose_left = np.ones(7, dtype=np.float32)
+        adapter._master_pose_right = np.ones(7, dtype=np.float32) * 2
+        adapter._master_pose_timestamp_us = int(now * 1e6)
+        adapter._master_pose_seq = 3
+        adapter._master_pose_recv_time = now - 1.0
+
+    assert adapter.get_takeover_action() is None
+
+
+def test_takeover_action_rejects_pose_before_follow_gate_timestamp():
+    adapter = X2RobotTakeoverTCPServer(
+        config=X2RobotTakeoverTCPConfig(takeover_delay_s=0.0, max_pose_age_s=1.0),
+        running_mode_getter=lambda: 2,
+        joint_snapshot_getter=lambda: np.zeros((2, 7), dtype=np.float32),
+    )
+    now = time.time()
+    with adapter._state_lock:
+        adapter._current_mode = 2
+        adapter._follow_start_time = now - 1.0
+        adapter._min_pose_timestamp_us = int(now * 1e6)
+        adapter._master_pose_left = np.ones(7, dtype=np.float32)
+        adapter._master_pose_right = np.ones(7, dtype=np.float32) * 2
+        adapter._master_pose_timestamp_us = adapter._min_pose_timestamp_us
+        adapter._master_pose_seq = 4
+        adapter._master_pose_recv_time = now
+
+    assert adapter.get_takeover_action() is None
+
+
+def test_takeover_action_accepts_fresh_pose_after_follow_gate():
+    adapter = X2RobotTakeoverTCPServer(
+        config=X2RobotTakeoverTCPConfig(takeover_delay_s=0.0, max_pose_age_s=1.0),
+        running_mode_getter=lambda: 2,
+        joint_snapshot_getter=lambda: np.zeros((2, 7), dtype=np.float32),
+    )
+    now = time.time()
+    left = np.arange(7, dtype=np.float32)
+    right = np.arange(7, 14, dtype=np.float32)
+    with adapter._state_lock:
+        adapter._current_mode = 2
+        adapter._follow_start_time = now - 1.0
+        adapter._min_pose_timestamp_us = int((now - 0.5) * 1e6)
+        adapter._master_pose_left = left
+        adapter._master_pose_right = right
+        adapter._master_pose_timestamp_us = int(now * 1e6)
+        adapter._master_pose_seq = 5
+        adapter._master_pose_recv_time = now
+
+    np.testing.assert_array_equal(
+        adapter.get_takeover_action(),
+        np.concatenate([left, right]).astype(np.float32),
+    )
