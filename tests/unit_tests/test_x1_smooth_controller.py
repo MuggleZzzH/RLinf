@@ -36,6 +36,19 @@ class FakeJointPublisher:
         self.messages.append(msg)
 
 
+class FakePosCmd:
+    def __init__(self):
+        self.x = 0.0
+        self.y = 0.0
+        self.z = 0.0
+        self.roll = 0.0
+        self.pitch = 0.0
+        self.yaw = 0.0
+        self.gripper = 0.0
+        self.mode1 = None
+        self.mode2 = None
+
+
 class FakeJointControl:
     def __init__(self):
         self.joint_pos = []
@@ -105,6 +118,7 @@ def _make_controller(
     controller.gripper_target_tolerance = gripper_tolerance
     controller.debug_pose_control = False
     controller.debug_gripper_control = False
+    controller.pose_control_backend = "smooth"
     controller.xyz_speed = 0.5
     controller.rpy_speed = 1.5
     controller.freq = 50
@@ -211,3 +225,81 @@ def test_smooth_controller_move_joint_publishes_joint_control(monkeypatch):
     assert left_msg.joint_vel == [0.0] * 7
     assert right_msg.joint_cur == [0.0] * 7
     assert left_msg.mode == 0
+
+
+def test_direct_controller_smooth_callback_returns_without_publishing(monkeypatch):
+    controller_cls = _load_controller_class(monkeypatch)
+    controller = _make_controller(
+        controller_cls,
+        left_current=[0, 0, 0, 0, 0, 0, 0.0],
+        right_current=[0, 0, 0, 0, 0, 0, 0.0],
+        left_target=[0.2, 0, 0, 0, 0, 0, 1.0],
+        right_target=[0.2, 0, 0, 0, 0, 0, 2.0],
+    )
+    controller.pose_control_backend = "direct"
+
+    controller.smooth_action_callback(None)
+
+    assert controller.controller.commands == []
+
+
+def test_direct_controller_move_arm_publishes_pos_cmd(monkeypatch):
+    controller_cls = _load_controller_class(monkeypatch)
+    controller = controller_cls.__new__(controller_cls)
+    controller.pose_control_backend = "direct"
+    controller._direct_pose_msg_cls = FakePosCmd
+    controller._direct_pose_left_pub = FakeJointPublisher()
+    controller._direct_pose_right_pub = FakeJointPublisher()
+    controller._direct_pose_left_target = None
+    controller._direct_pose_right_target = None
+    left = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    right = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7]
+
+    controller.move_arm(left, right)
+
+    assert controller.left_arm_target == left
+    assert controller.right_arm_target == right
+    assert len(controller._direct_pose_left_pub.messages) == 1
+    assert len(controller._direct_pose_right_pub.messages) == 1
+    left_msg = controller._direct_pose_left_pub.messages[0]
+    right_msg = controller._direct_pose_right_pub.messages[0]
+    assert [
+        left_msg.x,
+        left_msg.y,
+        left_msg.z,
+        left_msg.roll,
+        left_msg.pitch,
+        left_msg.yaw,
+        left_msg.gripper,
+    ] == left
+    assert [
+        right_msg.x,
+        right_msg.y,
+        right_msg.z,
+        right_msg.roll,
+        right_msg.pitch,
+        right_msg.yaw,
+        right_msg.gripper,
+    ] == right
+    assert left_msg.mode1 == 0
+    assert left_msg.mode2 == 0
+
+
+def test_direct_controller_timer_republishes_latest_pose(monkeypatch):
+    controller_cls = _load_controller_class(monkeypatch)
+    controller = controller_cls.__new__(controller_cls)
+    controller.pose_control_backend = "direct"
+    controller._direct_pose_msg_cls = FakePosCmd
+    controller._direct_pose_left_pub = FakeJointPublisher()
+    controller._direct_pose_right_pub = FakeJointPublisher()
+    left = [0.1] * 7
+    right = [0.2] * 7
+    controller._direct_pose_left_target = left
+    controller._direct_pose_right_target = right
+
+    controller.direct_pose_callback(None)
+
+    assert len(controller._direct_pose_left_pub.messages) == 1
+    assert len(controller._direct_pose_right_pub.messages) == 1
+    assert controller._direct_pose_left_pub.messages[0].x == 0.1
+    assert controller._direct_pose_right_pub.messages[0].gripper == 0.2

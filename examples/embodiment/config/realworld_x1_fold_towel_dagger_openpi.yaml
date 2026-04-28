@@ -111,7 +111,7 @@ env:
       only_success: True
       only_intervened: False
       robot_type: "x1"
-      fps: 10
+      fps: 60
       finalize_interval: 100
     master_takeover:
       host: "0.0.0.0"
@@ -134,6 +134,10 @@ env:
       use_arm_ids: [0, 1]
       use_camera_ids: [0, 1, 2]
       enforce_gripper_close: false
+      step_frequency: 60.0
+      direct_publish_hz: 100.0
+      reset_command_interval: 0.02
+      reset_min_interpolation_steps: 75
       debug_pose_control: false
       debug_gripper_control: false
       reset_ee_pose:
@@ -164,6 +168,10 @@ env:
       use_arm_ids: [0, 1]
       use_camera_ids: [0, 1, 2]
       enforce_gripper_close: false
+      step_frequency: 60.0
+      direct_publish_hz: 100.0
+      reset_command_interval: 0.02
+      reset_min_interpolation_steps: 75
       reset_ee_pose:
         - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]
         - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]

@@ -132,14 +132,108 @@ class X1DeployEnv(X1Env):
     def get_relative_pose_action_space(self) -> gym.spaces.Box:
         return self._relative_pose_action_space
 
+    def _current_absolute_pose_action(self) -> np.ndarray:
+        return np.stack(
+            [self._x1_state.follow1_pos, self._x1_state.follow2_pos]
+        ).astype(np.float32, copy=False).reshape(-1).copy()
+
+    def _last_published_absolute_pose_action(self) -> np.ndarray:
+        last_action = getattr(self, "_last_published_action", None)
+        if last_action is None:
+            return self._current_absolute_pose_action()
+        return np.asarray(last_action, dtype=np.float32).reshape(-1).copy()
+
+    def _direct_pose_rejection_reason(
+        self, raw_action: np.ndarray, expected_shape: tuple[int, ...]
+    ) -> str | None:
+        if raw_action.shape != expected_shape:
+            return f"invalid_shape:{raw_action.shape}"
+        if not np.all(np.isfinite(raw_action)):
+            return "non_finite"
+        low = self._absolute_pose_action_space.low
+        high = self._absolute_pose_action_space.high
+        if np.any(raw_action < low) or np.any(raw_action > high):
+            return "outside_absolute_pose_action_space"
+        if self.config.enforce_gripper_close:
+            grip_min = float(self.config.gripper_width_limit_min)
+            gripper_values = raw_action.reshape(-1, 7)[:, 6]
+            if np.any(np.abs(gripper_values - grip_min) > 1e-6):
+                return "enforce_gripper_close"
+        return None
+
     def step_absolute_pose(self, action: np.ndarray):
-        assert action.shape == (len(self.config.use_arm_ids) * 7,), (
-            f"Action shape must be {(len(self.config.use_arm_ids) * 7,)}, but got {action.shape}."
-        )
-
         start_time = time.time()
-        raw_action = np.asarray(action, dtype=np.float32).reshape(-1).copy()
+        expected_shape = (len(self.config.use_arm_ids) * 7,)
+        raw_action = np.asarray(action, dtype=np.float32)
+        pose_control_backend = str(self.config.pose_control_backend)
 
+        if pose_control_backend == "direct":
+            rejection_reason = self._direct_pose_rejection_reason(
+                raw_action,
+                expected_shape,
+            )
+            last_published_action = self._last_published_absolute_pose_action()
+            if rejection_reason is None:
+                executed_action = raw_action.reshape(-1).copy()
+                action_rejected = False
+                next_position = executed_action.reshape(-1, 7)
+                next_position1 = next_position[0]
+                next_position2 = next_position[1]
+                if not self.config.is_dummy:
+                    self._controller.move_arm(
+                        next_position1.tolist(), next_position2.tolist()
+                    ).wait()
+                else:
+                    self._x1_state.follow1_pos = next_position1.copy()
+                    self._x1_state.follow2_pos = next_position2.copy()
+                self._last_published_action = executed_action.copy()
+                last_published_action = executed_action.copy()
+            else:
+                executed_action = last_published_action.copy()
+                action_rejected = True
+
+            if self.config.debug_gripper_control or self.config.debug_pose_control:
+                now = time.time()
+                last_log_time = getattr(self, "_last_pose_debug_log_time", 0.0)
+                if now - last_log_time >= 1.0:
+                    self._last_pose_debug_log_time = now
+                    self._logger.info(
+                        "X1 direct pose target: raw=%s executed=%s "
+                        "rejected=%s reason=%s current_left=%s current_right=%s",
+                        np.array2string(raw_action.reshape(-1), precision=4),
+                        np.array2string(executed_action, precision=4),
+                        action_rejected,
+                        rejection_reason,
+                        np.array2string(self._x1_state.follow1_pos, precision=4),
+                        np.array2string(self._x1_state.follow2_pos, precision=4),
+                    )
+
+            self._num_steps += 1
+            step_time = time.time() - start_time
+            time.sleep(max(0, (1.0 / self.config.step_frequency) - step_time))
+
+            if not self.config.is_dummy:
+                self._x1_state = self._controller.get_state().wait()[0]
+            observation = self._get_observation()
+            reward = self._calc_step_reward(observation)
+            terminated = False
+            truncated = self._num_steps >= self.config.max_num_steps
+            info = {
+                "raw_action": raw_action.reshape(-1).copy(),
+                "executed_action": executed_action,
+                "action_clipped": False,
+                "clip_delta_max": 0.0,
+                "action_rejected": action_rejected,
+                "rejection_reason": rejection_reason,
+                "last_published_action": last_published_action,
+                "pose_control_backend": pose_control_backend,
+            }
+            return observation, reward, terminated, truncated, info
+
+        assert raw_action.shape == expected_shape, (
+            f"Action shape must be {expected_shape}, but got {raw_action.shape}."
+        )
+        raw_action = raw_action.reshape(-1).copy()
         action = np.clip(
             raw_action,
             self._absolute_pose_action_space.low,
@@ -220,7 +314,12 @@ class X1DeployEnv(X1Env):
             "executed_action": executed_action,
             "action_clipped": action_clipped,
             "clip_delta_max": clip_delta_max,
+            "action_rejected": False,
+            "rejection_reason": None,
+            "last_published_action": executed_action.copy(),
+            "pose_control_backend": pose_control_backend,
         }
+        self._last_published_action = executed_action.copy()
         return observation, reward, terminated, truncated, info
 
     def step_joint(self, action: np.ndarray):

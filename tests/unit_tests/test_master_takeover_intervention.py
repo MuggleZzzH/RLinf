@@ -84,7 +84,13 @@ class FakeTakeoverAdapter:
 
 
 class DummyTakeoverEnv(gym.Env):
-    def __init__(self, joint_shape=(2, 7), events=None, executed_action=None):
+    def __init__(
+        self,
+        joint_shape=(2, 7),
+        events=None,
+        executed_action=None,
+        action_rejected=False,
+    ):
         self.action_space = gym.spaces.Box(-10.0, 10.0, shape=(14,), dtype=np.float32)
         self.observation_space = gym.spaces.Box(
             -10.0, 10.0, shape=(14,), dtype=np.float32
@@ -94,6 +100,7 @@ class DummyTakeoverEnv(gym.Env):
         self.pose_snapshot = np.arange(14, dtype=np.float32).reshape(2, 7)
         self.events = events
         self.executed_action = executed_action
+        self.action_rejected = action_rejected
         self.executed_joint_action = None
         self.last_joint_action = None
 
@@ -106,6 +113,9 @@ class DummyTakeoverEnv(gym.Env):
             info["executed_action"] = np.asarray(
                 self.executed_action, dtype=np.float32
             )
+        if self.action_rejected:
+            info["action_rejected"] = True
+            info["rejection_reason"] = "outside_absolute_pose_action_space"
         return np.zeros(14, dtype=np.float32), 0.0, False, False, info
 
     def step_joint(self, action):
@@ -215,6 +225,23 @@ def test_master_takeover_records_post_clip_executed_action_as_expert():
     np.testing.assert_array_equal(info["executed_action"], executed)
     np.testing.assert_array_equal(info["intervene_action"], executed)
     assert info["intervene_flag"].item()
+
+
+def test_master_takeover_rejected_pose_does_not_write_expert_label():
+    expert = np.arange(14, dtype=np.float32)
+    executed = np.zeros(14, dtype=np.float32)
+    env = DummyTakeoverEnv(executed_action=executed, action_rejected=True)
+    adapter = FakeTakeoverAdapter(states=[(True, expert)])
+    wrapped = MasterTakeoverIntervention(env, adapter=adapter)
+
+    _, _, _, _, info = wrapped.step(np.ones(14, dtype=np.float32))
+
+    np.testing.assert_array_equal(env.last_action, expert)
+    np.testing.assert_array_equal(info["executed_action"], executed)
+    np.testing.assert_array_equal(info["raw_intervene_action"], expert)
+    assert info["intervene_rejected"] is True
+    assert not info["intervene_flag"].item()
+    assert "intervene_action" not in info
 
 
 def test_master_takeover_joint_mode_calls_step_joint_without_pose_label():

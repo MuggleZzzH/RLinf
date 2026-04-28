@@ -48,10 +48,15 @@ def test_x1_fold_towel_dagger_config_composes(monkeypatch):
     assert cfg.env.train.master_takeover.control_mode == "pose"
     assert cfg.env.train.master_takeover.max_pose_age_s == 0.25
     assert cfg.env.train.master_takeover.max_joint_age_s == 0.25
+    assert cfg.env.train.override_cfg.step_frequency == 60.0
+    assert cfg.env.train.override_cfg.direct_publish_hz == 100.0
+    assert cfg.env.train.override_cfg.reset_command_interval == 0.02
+    assert cfg.env.train.override_cfg.reset_min_interpolation_steps == 75
     assert cfg.env.train.data_collection.save_dir == "../results/x1_dagger_rollouts"
     assert cfg.env.train.data_collection.export_format == "lerobot"
     assert cfg.env.train.data_collection.only_success is True
     assert cfg.env.train.data_collection.only_intervened is False
+    assert cfg.env.train.data_collection.fps == 60
     assert cfg.env.eval.use_master_takeover is False
 
 
@@ -75,11 +80,16 @@ def test_x1_fold_towel_takeover_collect_config_composes(monkeypatch):
     assert cfg.env.eval.master_takeover.control_mode == "pose"
     assert cfg.env.eval.master_takeover.max_pose_age_s == 0.25
     assert cfg.env.eval.master_takeover.max_joint_age_s == 0.25
+    assert cfg.env.eval.override_cfg.step_frequency == 60.0
+    assert cfg.env.eval.override_cfg.direct_publish_hz == 100.0
+    assert cfg.env.eval.override_cfg.reset_command_interval == 0.02
+    assert cfg.env.eval.override_cfg.reset_min_interpolation_steps == 75
     assert cfg.env.eval.keyboard_reward_wrapper == "single_stage"
     assert cfg.env.eval.data_collection.enabled is True
     assert cfg.env.eval.data_collection.export_format == "lerobot"
     assert cfg.env.eval.data_collection.only_success is True
     assert cfg.env.eval.data_collection.only_intervened is False
+    assert cfg.env.eval.data_collection.fps == 60
     assert cfg.actor.model.openpi.config_name == "fold_towel_s2s"
     assert cfg.actor.model.action_dim == 14
     assert cfg.actor.model.num_action_chunks == 30
@@ -137,9 +147,194 @@ def test_embodied_dagger_rejects_joint_master_takeover(monkeypatch):
 def test_x1_deploy_config_rejects_single_arm_use_arm_ids():
     sys.modules.setdefault("cv2", types.ModuleType("cv2"))
     from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnvConfig
+    from rlinf.envs.realworld.xsquare.x1_env import X1RobotConfig
+
+    assert X1RobotConfig().pose_control_backend == "direct"
 
     with pytest.raises(ValueError, match=r"use_arm_ids=\[0, 1\]"):
         X1DeployEnvConfig(use_arm_ids=[1])
+
+
+def test_x1_absolute_pose_step_direct_accepts_raw_action():
+    sys.modules.setdefault("cv2", types.ModuleType("cv2"))
+    from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnv
+
+    env = X1DeployEnv(
+        {
+            "is_dummy": True,
+            "use_arm_ids": [0, 1],
+            "use_camera_ids": [2],
+            "enforce_gripper_close": False,
+            "ee_pose_limit_min": [[-1.0] * 6, [-1.0] * 6],
+            "ee_pose_limit_max": [[1.0] * 6, [1.0] * 6],
+            "gripper_width_limit_min": 0.0,
+            "gripper_width_limit_max": 5.0,
+        }
+    )
+
+    action = np.array([0.1] * 6 + [0.7] + [-0.1] * 6 + [0.8], dtype=np.float32)
+    _, _, _, _, info = env.step_absolute_pose(action)
+
+    assert info["pose_control_backend"] == "direct"
+    assert info["action_rejected"] is False
+    assert info["rejection_reason"] is None
+    assert info["action_clipped"] is False
+    np.testing.assert_array_equal(info["raw_action"], action)
+    np.testing.assert_array_equal(info["executed_action"], action)
+    np.testing.assert_array_equal(info["last_published_action"], action)
+    np.testing.assert_array_equal(env._x1_state.follow1_pos, action[:7])
+    np.testing.assert_array_equal(env._x1_state.follow2_pos, action[7:])
+
+
+def test_x1_absolute_pose_step_direct_rejects_out_of_bounds_without_publish():
+    sys.modules.setdefault("cv2", types.ModuleType("cv2"))
+    from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnv
+
+    env = X1DeployEnv(
+        {
+            "is_dummy": True,
+            "use_arm_ids": [0, 1],
+            "use_camera_ids": [2],
+            "enforce_gripper_close": False,
+            "ee_pose_limit_min": [[-0.1] * 6, [-0.2] * 6],
+            "ee_pose_limit_max": [[0.1] * 6, [0.2] * 6],
+            "gripper_width_limit_min": 0.0,
+            "gripper_width_limit_max": 1.0,
+        }
+    )
+    before = np.stack([env._x1_state.follow1_pos, env._x1_state.follow2_pos]).reshape(
+        -1
+    )
+
+    action = np.array([0.3] * 6 + [2.0] + [-0.3] * 6 + [-1.0], dtype=np.float32)
+    _, _, _, _, info = env.step_absolute_pose(action)
+
+    assert info["action_rejected"] is True
+    assert info["rejection_reason"] == "outside_absolute_pose_action_space"
+    assert info["action_clipped"] is False
+    np.testing.assert_array_equal(info["raw_action"], action)
+    np.testing.assert_array_equal(info["executed_action"], before)
+    np.testing.assert_array_equal(info["last_published_action"], before)
+    np.testing.assert_array_equal(env._x1_state.follow1_pos, before[:7])
+    np.testing.assert_array_equal(env._x1_state.follow2_pos, before[7:])
+
+
+def test_x1_absolute_pose_step_direct_rejects_bad_shape():
+    sys.modules.setdefault("cv2", types.ModuleType("cv2"))
+    from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnv
+
+    env = X1DeployEnv(
+        {
+            "is_dummy": True,
+            "use_arm_ids": [0, 1],
+            "use_camera_ids": [2],
+            "enforce_gripper_close": False,
+        }
+    )
+
+    _, _, _, _, info = env.step_absolute_pose(np.ones(13, dtype=np.float32))
+
+    assert info["action_rejected"] is True
+    assert info["rejection_reason"] == "invalid_shape:(13,)"
+    assert info["executed_action"].shape == (14,)
+
+
+def test_x1_reset_next_step_bounds_large_pose_jumps():
+    sys.modules.setdefault("cv2", types.ModuleType("cv2"))
+    from rlinf.envs.realworld.xsquare.x1_env import X1Env, X1RobotConfig
+
+    env = X1Env.__new__(X1Env)
+    env.config = X1RobotConfig(
+        reset_max_xyz_step=0.02,
+        reset_max_rpy_step=0.075,
+        reset_max_gripper_step=0.25,
+    )
+    current = np.array(
+        [
+            [0.0, 0.0, 0.0, -3.13, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, -3.13, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    target = np.array(
+        [
+            [0.1, 0.0, 0.0, 3.13, 0.0, 0.0, 0.5],
+            [0.0, 0.2, 0.0, 0.0, 3.13, 0.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+    previous = current
+    for _ in range(20):
+        waypoint = env._reset_next_step(previous, target)
+        assert np.max(np.abs(waypoint[:, :3] - previous[:, :3])) <= 0.020001
+        assert (
+            np.max(
+                np.abs(
+                    X1Env._shortest_angle_delta(
+                        previous[:, 3:6],
+                        waypoint[:, 3:6],
+                    )
+                )
+            )
+            <= 0.075001
+        )
+        assert np.max(np.abs(waypoint[:, 6] - previous[:, 6])) <= 0.250001
+        previous = waypoint
+        if env._reset_pose_reached(previous, target):
+            break
+
+    assert env._reset_pose_reached(previous, target)
+
+
+def test_x1_reset_interpolation_uses_minimum_jerk_and_bounded_steps():
+    sys.modules.setdefault("cv2", types.ModuleType("cv2"))
+    from rlinf.envs.realworld.xsquare.x1_env import X1Env, X1RobotConfig
+
+    env = X1Env.__new__(X1Env)
+    env.config = X1RobotConfig(
+        reset_max_xyz_step=0.02,
+        reset_max_rpy_step=0.075,
+        reset_max_gripper_step=0.25,
+        reset_min_interpolation_steps=75,
+    )
+    current = np.array(
+        [
+            [0.0, 0.0, 0.0, -3.13, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, -3.13, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    target = np.array(
+        [
+            [0.2, 0.0, 0.1, 3.13, 0.0, 0.0, 0.5],
+            [0.0, 0.2, 0.1, 0.0, 3.13, 0.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+    waypoints = env._reset_interpolated_waypoints(current, target)
+
+    assert len(waypoints) >= 75
+    np.testing.assert_allclose(waypoints[-1], target)
+    assert np.linalg.norm(waypoints[0][:, :3] - current[:, :3]) < 1e-3
+
+    previous = current
+    for waypoint in waypoints:
+        assert np.max(np.abs(waypoint[:, :3] - previous[:, :3])) <= 0.020001
+        assert (
+            np.max(
+                np.abs(
+                    X1Env._shortest_angle_delta(
+                        previous[:, 3:6],
+                        waypoint[:, 3:6],
+                    )
+                )
+            )
+            <= 0.075001
+        )
+        assert np.max(np.abs(waypoint[:, 6] - previous[:, 6])) <= 0.250001
+        previous = waypoint
 
 
 def test_x1_absolute_pose_step_returns_post_clip_executed_action():
@@ -149,6 +344,7 @@ def test_x1_absolute_pose_step_returns_post_clip_executed_action():
     env = X1DeployEnv(
         {
             "is_dummy": True,
+            "pose_control_backend": "smooth",
             "use_arm_ids": [0, 1],
             "use_camera_ids": [2],
             "enforce_gripper_close": False,

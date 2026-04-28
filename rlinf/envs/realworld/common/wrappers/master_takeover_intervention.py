@@ -183,6 +183,7 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
             executed_for_log = np.asarray(
                 info.get("executed_action", new_action), dtype=np.float32
             )
+        action_rejected = bool(info.get("action_rejected", False))
         if self._debug_log and (
             self.adapter.is_takeover_active() or decision != "policy"
         ):
@@ -203,10 +204,14 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
             info["executed_joint_action"] = executed_for_log
         else:
             info["executed_action"] = executed_for_log
-        info["intervene_flag"] = np.asarray([replaced], dtype=bool)
-        if replaced and selected_control_mode == "joint":
+        accepted_intervention = replaced and not action_rejected
+        info["intervene_flag"] = np.asarray([accepted_intervention], dtype=bool)
+        if accepted_intervention and selected_control_mode == "joint":
             info["intervene_joint_action"] = executed_for_log
-        elif replaced:
+        elif replaced and action_rejected:
+            info["raw_intervene_action"] = np.asarray(new_action, dtype=np.float32)
+            info["intervene_rejected"] = True
+        elif accepted_intervention:
             info["intervene_action"] = executed_for_log
         info["takeover_active"] = self.adapter.is_takeover_active()
         info["takeover_chunk_hold"] = chunk_holding

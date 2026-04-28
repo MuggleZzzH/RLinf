@@ -45,6 +45,10 @@ class X1SmoothController(Worker):
         debug_pose_control: bool = False,
         debug_gripper_control: bool = False,
         gripper_target_tolerance: float = 0.05,
+        pose_control_backend: str = "direct",
+        direct_publish_hz: float = 100.0,
+        follower_pose_cmd_left_topic: str = "/follow_pos_cmd_1",
+        follower_pose_cmd_right_topic: str = "/follow_pos_cmd_2",
         follower_joint_cmd_left_topic: str = "/follow_joint_control_1",
         follower_joint_cmd_right_topic: str = "/follow_joint_control_2",
     ):
@@ -65,6 +69,10 @@ class X1SmoothController(Worker):
             debug_pose_control,
             debug_gripper_control,
             gripper_target_tolerance,
+            pose_control_backend,
+            direct_publish_hz,
+            follower_pose_cmd_left_topic,
+            follower_pose_cmd_right_topic,
             follower_joint_cmd_left_topic,
             follower_joint_cmd_right_topic,
         ).launch(
@@ -79,6 +87,10 @@ class X1SmoothController(Worker):
         debug_pose_control: bool = False,
         debug_gripper_control: bool = False,
         gripper_target_tolerance: float = 0.05,
+        pose_control_backend: str = "direct",
+        direct_publish_hz: float = 100.0,
+        follower_pose_cmd_left_topic: str = "/follow_pos_cmd_1",
+        follower_pose_cmd_right_topic: str = "/follow_pos_cmd_2",
         follower_joint_cmd_left_topic: str = "/follow_joint_control_1",
         follower_joint_cmd_right_topic: str = "/follow_joint_control_2",
     ):
@@ -93,6 +105,22 @@ class X1SmoothController(Worker):
         self.controller.chassis_set_current_pose_as_virtual_zero()
 
         self._state = X1RobotState()
+        self.pose_control_backend = str(pose_control_backend).lower()
+        if self.pose_control_backend not in {"direct", "smooth"}:
+            raise ValueError(
+                "pose_control_backend must be one of {'direct', 'smooth'}, "
+                f"got {self.pose_control_backend!r}."
+            )
+        self.direct_publish_hz = float(direct_publish_hz)
+        if self.direct_publish_hz <= 0:
+            raise ValueError("direct_publish_hz must be positive.")
+        self._follower_pose_cmd_left_topic = follower_pose_cmd_left_topic
+        self._follower_pose_cmd_right_topic = follower_pose_cmd_right_topic
+        self._direct_pose_msg_cls = None
+        self._direct_pose_left_pub = None
+        self._direct_pose_right_pub = None
+        self._direct_pose_left_target = None
+        self._direct_pose_right_target = None
         self._follower_joint_cmd_left_topic = follower_joint_cmd_left_topic
         self._follower_joint_cmd_right_topic = follower_joint_cmd_right_topic
         self._joint_cmd_msg_cls = None
@@ -120,7 +148,11 @@ class X1SmoothController(Worker):
         self.freq = freq
 
         # FIXME: should move to roscontroller
-        rospy.Timer(control_period, self.smooth_action_callback)
+        if self.pose_control_backend == "smooth":
+            rospy.Timer(control_period, self.smooth_action_callback)
+        else:
+            direct_period = rospy.Duration(1 / self.direct_publish_hz)
+            rospy.Timer(direct_period, self.direct_pose_callback)
         rospy.Timer(state_period, self.state_callback)
 
         tracemalloc.start(15)
@@ -150,6 +182,8 @@ class X1SmoothController(Worker):
         return self._state
 
     def smooth_action_callback(self, event):
+        if getattr(self, "pose_control_backend", "smooth") != "smooth":
+            return
         # print("intimer")
         xyz_step = self.xyz_speed / self.freq  # m
         rpy_step = self.rpy_speed / self.freq  # rad
@@ -440,6 +474,68 @@ class X1SmoothController(Worker):
         )
         self.left_arm_target = left_arm_target
         self.right_arm_target = right_arm_target
+        if getattr(self, "pose_control_backend", "smooth") == "direct":
+            self._direct_pose_left_target = list(left_arm_target)
+            self._direct_pose_right_target = list(right_arm_target)
+            self._publish_direct_pose(left_arm_target, right_arm_target)
+            return
+
+    def direct_pose_callback(self, event):
+        if getattr(self, "pose_control_backend", "smooth") != "direct":
+            return
+        if (
+            self._direct_pose_left_target is None
+            or self._direct_pose_right_target is None
+        ):
+            return
+        self._publish_direct_pose(
+            self._direct_pose_left_target,
+            self._direct_pose_right_target,
+        )
+
+    def _ensure_direct_pose_publishers(self):
+        if (
+            self._direct_pose_msg_cls is not None
+            and self._direct_pose_left_pub is not None
+            and self._direct_pose_right_pub is not None
+        ):
+            return
+        try:
+            from arm_control.msg import PosCmd
+        except ImportError:
+            from communicationPort.msg import PosCmd
+
+        self._direct_pose_msg_cls = PosCmd
+        self._direct_pose_left_pub = rospy.Publisher(
+            self._follower_pose_cmd_left_topic,
+            PosCmd,
+            queue_size=10,
+        )
+        self._direct_pose_right_pub = rospy.Publisher(
+            self._follower_pose_cmd_right_topic,
+            PosCmd,
+            queue_size=10,
+        )
+
+    def _make_pos_cmd_msg(self, pose):
+        msg = self._direct_pose_msg_cls()
+        msg.x = float(pose[0])
+        msg.y = float(pose[1])
+        msg.z = float(pose[2])
+        msg.roll = float(pose[3])
+        msg.pitch = float(pose[4])
+        msg.yaw = float(pose[5])
+        msg.gripper = float(pose[6])
+        if hasattr(msg, "mode1"):
+            msg.mode1 = 0
+        if hasattr(msg, "mode2"):
+            msg.mode2 = 0
+        return msg
+
+    def _publish_direct_pose(self, left_pose, right_pose):
+        self._ensure_direct_pose_publishers()
+        self._direct_pose_left_pub.publish(self._make_pos_cmd_msg(left_pose))
+        self._direct_pose_right_pub.publish(self._make_pos_cmd_msg(right_pose))
 
     def _make_joint_control_msg(self, joint_pos):
         msg = self._joint_cmd_msg_cls()
@@ -494,7 +590,12 @@ class X1SmoothController(Worker):
         self.last_expected_rpy1 = left_pose[3:6].copy()
         self.last_expected_rpy2 = right_pose[3:6].copy()
 
-        self.controller.arms_control(self.left_arm_target, self.right_arm_target)
+        if getattr(self, "pose_control_backend", "smooth") == "direct":
+            self._direct_pose_left_target = self.left_arm_target
+            self._direct_pose_right_target = self.right_arm_target
+            self._publish_direct_pose(self.left_arm_target, self.right_arm_target)
+        else:
+            self.controller.arms_control(self.left_arm_target, self.right_arm_target)
         return state
 
     def reset_arms(self):
