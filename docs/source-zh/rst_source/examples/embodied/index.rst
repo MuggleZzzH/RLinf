@@ -475,4 +475,5 @@
    hg-dagger
    franka_pi0_sft_deploy
    xsquare_turtle2
+   turtle2_dagger_takeover
    dosw1

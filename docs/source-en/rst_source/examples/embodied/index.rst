@@ -485,4 +485,5 @@ as well as reinforcement learning training examples on real robots.
    hg-dagger
    franka_pi0_sft_deploy
    xsquare_turtle2
+   turtle2_dagger_takeover
    dosw1
