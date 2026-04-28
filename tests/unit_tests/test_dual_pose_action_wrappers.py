@@ -12,12 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib
+
 import gymnasium as gym
 import numpy as np
 import pytest
 
-from rlinf.envs.realworld.common.wrappers import apply_dual_pose_action_wrappers
-from rlinf.envs.realworld.franka.utils import construct_adjoint_matrix
+apply_dual_pose_action_wrappers = None
+construct_adjoint_matrix = None
+
+
+@pytest.fixture(autouse=True)
+def _realworld_imports(monkeypatch):
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "cv2", types.ModuleType("cv2"))
+    wrappers = importlib.import_module("rlinf.envs.realworld.common.wrappers")
+    franka_utils = importlib.import_module("rlinf.envs.realworld.franka.utils")
+
+    globals()["apply_dual_pose_action_wrappers"] = (
+        wrappers.apply_dual_pose_action_wrappers
+    )
+    globals()["construct_adjoint_matrix"] = franka_utils.construct_adjoint_matrix
 
 
 class DummyDualPoseEnv(gym.Env):
@@ -151,3 +168,11 @@ def test_dual_pose_builder_relative_mode_no_relative_frame():
 def test_dual_pose_builder_rejects_unknown_action_mode():
     with pytest.raises(ValueError, match="Unsupported action_mode"):
         apply_dual_pose_action_wrappers(DummyDualPoseEnv(), {"action_mode": "joint"})
+
+
+def test_dual_pose_builder_rejects_relative_master_takeover():
+    with pytest.raises(ValueError, match="requires action_mode='absolute_pose'"):
+        apply_dual_pose_action_wrappers(
+            DummyDualPoseEnv(),
+            {"action_mode": "relative_pose", "use_master_takeover": True},
+        )

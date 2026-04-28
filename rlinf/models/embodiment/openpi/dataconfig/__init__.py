@@ -62,6 +62,9 @@ from rlinf.models.embodiment.openpi.dataconfig.robocasa_dataconfig import (
 from rlinf.models.embodiment.openpi.dataconfig.robotwin_aloha_dataconfig import (
     LeRobotAlohaDataConfig,
 )
+from rlinf.models.embodiment.openpi.dataconfig.x2robot_dataconfig import (
+    LeRobotX2RobotDataConfig,
+)
 
 _CONFIGS = [
     TrainConfig(
@@ -396,6 +399,22 @@ _CONFIGS = [
             "checkpoints/jax/pi05_base/params"
         ),
         pytorch_weight_path="checkpoints/torch/pi05_base",
+    ),
+    TrainConfig(
+        name="pi0_turtle2_x2robot",
+        model=pi0_config.Pi0Config(action_horizon=30),
+        data=LeRobotX2RobotDataConfig(
+            repo_id="RLinf/Turtle2-X2Robot",
+            base_config=DataConfig(prompt_from_task=True),
+            assets=AssetsConfig(
+                assets_dir="checkpoints/torch/pi0_turtle2_x2robot/assets"
+            ),
+            action_dim=14,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "checkpoints/jax/pi0_base/params"
+        ),
+        pytorch_weight_path="checkpoints/torch/pi0_base",
     ),
 ]
 
