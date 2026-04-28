@@ -127,6 +127,10 @@ env:
       enforce_gripper_close: false
       step_frequency: 60.0
       direct_publish_hz: 100.0
+      direct_pose_limiter_enabled: true
+      direct_max_xyz_step: 0.015
+      direct_max_rpy_step: 0.05
+      direct_max_gripper_step: 0.25
       reset_command_interval: 0.02
       reset_min_interpolation_steps: 75
       debug_pose_control: false

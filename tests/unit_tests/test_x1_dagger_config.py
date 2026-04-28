@@ -50,6 +50,10 @@ def test_x1_fold_towel_dagger_config_composes(monkeypatch):
     assert cfg.env.train.master_takeover.max_joint_age_s == 0.25
     assert cfg.env.train.override_cfg.step_frequency == 60.0
     assert cfg.env.train.override_cfg.direct_publish_hz == 100.0
+    assert cfg.env.train.override_cfg.direct_pose_limiter_enabled is True
+    assert cfg.env.train.override_cfg.direct_max_xyz_step == 0.015
+    assert cfg.env.train.override_cfg.direct_max_rpy_step == 0.05
+    assert cfg.env.train.override_cfg.direct_max_gripper_step == 0.25
     assert cfg.env.train.override_cfg.reset_command_interval == 0.02
     assert cfg.env.train.override_cfg.reset_min_interpolation_steps == 75
     assert cfg.env.train.data_collection.save_dir == "../results/x1_dagger_rollouts"
@@ -82,6 +86,10 @@ def test_x1_fold_towel_takeover_collect_config_composes(monkeypatch):
     assert cfg.env.eval.master_takeover.max_joint_age_s == 0.25
     assert cfg.env.eval.override_cfg.step_frequency == 60.0
     assert cfg.env.eval.override_cfg.direct_publish_hz == 100.0
+    assert cfg.env.eval.override_cfg.direct_pose_limiter_enabled is True
+    assert cfg.env.eval.override_cfg.direct_max_xyz_step == 0.015
+    assert cfg.env.eval.override_cfg.direct_max_rpy_step == 0.05
+    assert cfg.env.eval.override_cfg.direct_max_gripper_step == 0.25
     assert cfg.env.eval.override_cfg.reset_command_interval == 0.02
     assert cfg.env.eval.override_cfg.reset_min_interpolation_steps == 75
     assert cfg.env.eval.keyboard_reward_wrapper == "single_stage"
@@ -93,6 +101,27 @@ def test_x1_fold_towel_takeover_collect_config_composes(monkeypatch):
     assert cfg.actor.model.openpi.config_name == "fold_towel_s2s"
     assert cfg.actor.model.action_dim == 14
     assert cfg.actor.model.num_action_chunks == 30
+
+
+def test_x1_fold_towel_openpi_s2s_eval_config_enables_direct_limiter(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[2]
+    config_dir = repo_root / "examples" / "embodiment" / "config"
+    monkeypatch.setenv("EMBODIED_PATH", str(repo_root / "examples" / "embodiment"))
+
+    GlobalHydra.instance().clear()
+    try:
+        with initialize_config_dir(config_dir=str(config_dir), version_base="1.1"):
+            cfg = compose(config_name="realworld_x1_fold_towel_openpi_s2s_eval")
+    finally:
+        GlobalHydra.instance().clear()
+
+    assert cfg.runner.only_eval is True
+    assert cfg.env.eval.action_mode == "absolute_pose"
+    assert cfg.env.eval.override_cfg.direct_pose_limiter_enabled is True
+    assert cfg.env.eval.override_cfg.direct_max_xyz_step == 0.015
+    assert cfg.env.eval.override_cfg.direct_max_rpy_step == 0.05
+    assert cfg.env.eval.override_cfg.direct_max_gripper_step == 0.25
+    assert cfg.actor.model.openpi.config_name == "fold_towel_s2s"
 
 
 def test_x1_fold_towel_takeover_collect_joint_config_composes(monkeypatch):
@@ -150,6 +179,7 @@ def test_x1_deploy_config_rejects_single_arm_use_arm_ids():
     from rlinf.envs.realworld.xsquare.x1_env import X1RobotConfig
 
     assert X1RobotConfig().pose_control_backend == "direct"
+    assert X1RobotConfig().direct_pose_limiter_enabled is False
 
     with pytest.raises(ValueError, match=r"use_arm_ids=\[0, 1\]"):
         X1DeployEnvConfig(use_arm_ids=[1])
@@ -184,6 +214,95 @@ def test_x1_absolute_pose_step_direct_accepts_raw_action():
     np.testing.assert_array_equal(info["last_published_action"], action)
     np.testing.assert_array_equal(env._x1_state.follow1_pos, action[:7])
     np.testing.assert_array_equal(env._x1_state.follow2_pos, action[7:])
+
+
+def test_x1_absolute_pose_step_direct_limiter_bounds_large_pose_jump():
+    sys.modules.setdefault("cv2", types.ModuleType("cv2"))
+    from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnv
+
+    env = X1DeployEnv(
+        {
+            "is_dummy": True,
+            "use_arm_ids": [0, 1],
+            "use_camera_ids": [2],
+            "enforce_gripper_close": False,
+            "direct_pose_limiter_enabled": True,
+            "direct_max_xyz_step": 0.02,
+            "direct_max_rpy_step": 0.05,
+            "direct_max_gripper_step": 0.25,
+            "ee_pose_limit_min": [[-1.0] * 6, [-1.0] * 6],
+            "ee_pose_limit_max": [[1.0] * 6, [1.0] * 6],
+            "gripper_width_limit_min": 0.0,
+            "gripper_width_limit_max": 5.0,
+        }
+    )
+
+    action = np.array(
+        [0.1, -0.1, 0.03, 0.2, -0.2, 0.08, 0.7]
+        + [-0.1, 0.1, -0.03, -0.2, 0.2, -0.08, 0.9],
+        dtype=np.float32,
+    )
+    _, _, _, _, info = env.step_absolute_pose(action)
+
+    expected = np.array(
+        [0.02, -0.02, 0.02, 0.05, -0.05, 0.05, 0.25]
+        + [-0.02, 0.02, -0.02, -0.05, 0.05, -0.05, 0.25],
+        dtype=np.float32,
+    )
+    assert info["action_rejected"] is False
+    assert info["direct_pose_limiter_enabled"] is True
+    assert info["direct_pose_limited"] is True
+    assert info["direct_pose_delta_max"] > 0.0
+    np.testing.assert_array_equal(info["raw_action"], action)
+    np.testing.assert_allclose(info["executed_action"], expected, atol=1e-6)
+    np.testing.assert_allclose(info["last_published_action"], expected, atol=1e-6)
+    np.testing.assert_allclose(env._x1_state.follow1_pos, expected[:7], atol=1e-6)
+    np.testing.assert_allclose(env._x1_state.follow2_pos, expected[7:], atol=1e-6)
+
+
+def test_x1_absolute_pose_step_direct_limiter_uses_shortest_rpy_delta():
+    sys.modules.setdefault("cv2", types.ModuleType("cv2"))
+    from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnv
+    from rlinf.envs.realworld.xsquare.x1_env import X1Env
+
+    env = X1DeployEnv(
+        {
+            "is_dummy": True,
+            "use_arm_ids": [0, 1],
+            "use_camera_ids": [2],
+            "enforce_gripper_close": False,
+            "direct_pose_limiter_enabled": True,
+            "direct_max_xyz_step": 0.02,
+            "direct_max_rpy_step": 0.075,
+            "direct_max_gripper_step": 0.25,
+            "ee_pose_limit_min": [[-3.2] * 6, [-3.2] * 6],
+            "ee_pose_limit_max": [[3.2] * 6, [3.2] * 6],
+            "gripper_width_limit_min": 0.0,
+            "gripper_width_limit_max": 5.0,
+        }
+    )
+    current = np.array(
+        [0.0, 0.0, 0.0, 3.13, 0.0, 0.0, 0.0]
+        + [0.0, 0.0, 0.0, 0.0, -3.13, 0.0, 0.0],
+        dtype=np.float32,
+    )
+    env._x1_state.follow1_pos = current[:7].copy()
+    env._x1_state.follow2_pos = current[7:].copy()
+    env._last_published_action = current.copy()
+    action = current.copy()
+    action[3] = -3.13
+    action[11] = 3.13
+
+    _, _, _, _, info = env.step_absolute_pose(action)
+
+    executed = info["executed_action"].reshape(2, 7)
+    current_pose = current.reshape(2, 7)
+    rpy_delta = X1Env._shortest_angle_delta(
+        current_pose[:, 3:6],
+        executed[:, 3:6],
+    )
+    assert np.max(np.abs(rpy_delta)) <= 0.075001
+    np.testing.assert_allclose(executed.reshape(-1), action, atol=1e-6)
 
 
 def test_x1_absolute_pose_step_direct_rejects_out_of_bounds_without_publish():

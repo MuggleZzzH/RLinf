@@ -43,6 +43,10 @@ class X1RobotConfig:
     smooth_frequency: int = 50  # Frequency for smooth controller
     pose_control_backend: str = "direct"  # "direct" or "smooth"
     direct_publish_hz: float = 100.0
+    direct_pose_limiter_enabled: bool = False
+    direct_max_xyz_step: float = 0.015
+    direct_max_rpy_step: float = 0.05
+    direct_max_gripper_step: float = 0.25
     reset_max_xyz_step: float = 0.02
     reset_max_rpy_step: float = 0.075
     reset_max_gripper_step: float = 0.25
@@ -143,6 +147,20 @@ class X1Env(gym.Env):
         self.config.direct_publish_hz = float(self.config.direct_publish_hz)
         if self.config.direct_publish_hz <= 0:
             raise ValueError("direct_publish_hz must be positive.")
+        self.config.direct_pose_limiter_enabled = bool(
+            self.config.direct_pose_limiter_enabled
+        )
+        self.config.direct_max_xyz_step = float(self.config.direct_max_xyz_step)
+        self.config.direct_max_rpy_step = float(self.config.direct_max_rpy_step)
+        self.config.direct_max_gripper_step = float(
+            self.config.direct_max_gripper_step
+        )
+        if self.config.direct_max_xyz_step <= 0:
+            raise ValueError("direct_max_xyz_step must be positive.")
+        if self.config.direct_max_rpy_step <= 0:
+            raise ValueError("direct_max_rpy_step must be positive.")
+        if self.config.direct_max_gripper_step <= 0:
+            raise ValueError("direct_max_gripper_step must be positive.")
         self.config.reset_max_xyz_step = float(self.config.reset_max_xyz_step)
         self.config.reset_max_rpy_step = float(self.config.reset_max_rpy_step)
         self.config.reset_max_gripper_step = float(self.config.reset_max_gripper_step)

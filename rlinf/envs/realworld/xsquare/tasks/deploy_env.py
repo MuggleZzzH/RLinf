@@ -161,6 +161,39 @@ class X1DeployEnv(X1Env):
                 return "enforce_gripper_close"
         return None
 
+    def _limited_direct_pose_action(
+        self, raw_action: np.ndarray, last_published_action: np.ndarray
+    ) -> np.ndarray:
+        target = np.asarray(raw_action, dtype=np.float32).reshape(-1, 7)
+        if not self.config.direct_pose_limiter_enabled:
+            return target.reshape(-1).copy()
+
+        current = np.asarray(last_published_action, dtype=np.float32).reshape(-1, 7)
+        xyz_delta = target[:, :3] - current[:, :3]
+        rpy_delta = self._shortest_angle_delta(current[:, 3:6], target[:, 3:6])
+        gripper_delta = target[:, 6] - current[:, 6]
+
+        limited = current.copy()
+        limited[:, :3] = current[:, :3] + np.clip(
+            xyz_delta,
+            -self.config.direct_max_xyz_step,
+            self.config.direct_max_xyz_step,
+        )
+        limited[:, 3:6] = self._normalize_angles(
+            current[:, 3:6]
+            + np.clip(
+                rpy_delta,
+                -self.config.direct_max_rpy_step,
+                self.config.direct_max_rpy_step,
+            )
+        )
+        limited[:, 6] = current[:, 6] + np.clip(
+            gripper_delta,
+            -self.config.direct_max_gripper_step,
+            self.config.direct_max_gripper_step,
+        )
+        return limited.astype(np.float32, copy=False).reshape(-1).copy()
+
     def step_absolute_pose(self, action: np.ndarray):
         start_time = time.time()
         expected_shape = (len(self.config.use_arm_ids) * 7,)
@@ -174,7 +207,10 @@ class X1DeployEnv(X1Env):
             )
             last_published_action = self._last_published_absolute_pose_action()
             if rejection_reason is None:
-                executed_action = raw_action.reshape(-1).copy()
+                executed_action = self._limited_direct_pose_action(
+                    raw_action,
+                    last_published_action,
+                )
                 action_rejected = False
                 next_position = executed_action.reshape(-1, 7)
                 next_position1 = next_position[0]
@@ -223,6 +259,17 @@ class X1DeployEnv(X1Env):
                 "executed_action": executed_action,
                 "action_clipped": False,
                 "clip_delta_max": 0.0,
+                "direct_pose_limiter_enabled": self.config.direct_pose_limiter_enabled,
+                "direct_pose_limited": bool(
+                    np.max(np.abs(executed_action - raw_action.reshape(-1))) > 1e-6
+                )
+                if not action_rejected
+                else False,
+                "direct_pose_delta_max": float(
+                    np.max(np.abs(executed_action - raw_action.reshape(-1)))
+                )
+                if not action_rejected
+                else 0.0,
                 "action_rejected": action_rejected,
                 "rejection_reason": rejection_reason,
                 "last_published_action": last_published_action,
