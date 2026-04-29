@@ -198,7 +198,9 @@ class X1DeployEnv(X1Env):
         start_time = time.time()
         expected_shape = (len(self.config.use_arm_ids) * 7,)
         raw_action = np.asarray(action, dtype=np.float32)
-        pose_control_backend = str(self.config.pose_control_backend)
+        pose_control_backend, action_source = (
+            self._consume_pose_control_backend_override()
+        )
 
         if pose_control_backend == "direct":
             rejection_reason = self._direct_pose_rejection_reason(
@@ -216,7 +218,7 @@ class X1DeployEnv(X1Env):
                 next_position1 = next_position[0]
                 next_position2 = next_position[1]
                 if not self.config.is_dummy:
-                    self._controller.move_arm(
+                    self._controller.move_arm_direct(
                         next_position1.tolist(), next_position2.tolist()
                     ).wait()
                 else:
@@ -274,6 +276,9 @@ class X1DeployEnv(X1Env):
                 "rejection_reason": rejection_reason,
                 "last_published_action": last_published_action,
                 "pose_control_backend": pose_control_backend,
+                "pose_control_backend_effective": pose_control_backend,
+                "action_source": action_source,
+                "takeover_direct_gate_active": self.is_takeover_direct_gate_active(),
             }
             return observation, reward, terminated, truncated, info
 
@@ -365,6 +370,9 @@ class X1DeployEnv(X1Env):
             "rejection_reason": None,
             "last_published_action": executed_action.copy(),
             "pose_control_backend": pose_control_backend,
+            "pose_control_backend_effective": pose_control_backend,
+            "action_source": action_source,
+            "takeover_direct_gate_active": self.is_takeover_direct_gate_active(),
         }
         self._last_published_action = executed_action.copy()
         return observation, reward, terminated, truncated, info

@@ -86,6 +86,9 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
         self._was_takeover_active = self.adapter.is_takeover_active()
         self._chunk_step_index = 0
         self._takeover_sync_hold_steps = 0
+        if self._was_takeover_active:
+            self._set_takeover_direct_gate(True)
+            self._reset_direct_pose_baseline()
 
     def begin_action_chunk(self) -> None:
         self._chunk_active = True
@@ -96,19 +99,59 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
         self._chunk_active = False
         self._hold_until_chunk_end = False
 
+    def _call_env_hook(self, name: str, *args):
+        try:
+            hook = self.get_wrapper_attr(name)
+        except AttributeError:
+            return None
+        return hook(*args)
+
+    def _set_takeover_direct_gate(self, enabled: bool) -> None:
+        self._call_env_hook("set_takeover_direct_gate", enabled)
+
+    def _reset_direct_pose_baseline(self) -> None:
+        self._call_env_hook("reset_direct_pose_baseline_to_current")
+
+    def _sync_smooth_target_to_current_pose(self) -> None:
+        self._call_env_hook("sync_smooth_target_to_current_pose")
+
+    def _clear_direct_pose_target(self) -> None:
+        self._call_env_hook("clear_direct_pose_target")
+
+    def _is_takeover_direct_gate_active(self) -> bool | None:
+        gate_active = self._call_env_hook("is_takeover_direct_gate_active")
+        if gate_active is None:
+            return None
+        return bool(gate_active)
+
+    def _pose_backend_for_decision(self, decision: str) -> str:
+        if decision in {"expert", "sync_hold"}:
+            return "direct"
+        return "smooth"
+
+    def _set_pose_backend_override(self, backend: str, source: str) -> None:
+        self._call_env_hook("set_pose_control_backend_override", backend, source)
+
     def action(
         self, action: np.ndarray
     ) -> tuple[np.ndarray, bool, bool, bool, str, str]:
         self.adapter.poll()
         takeover_active = self.adapter.is_takeover_active()
-        if self._chunk_active and self._was_takeover_active and not takeover_active:
-            self._hold_until_chunk_end = True
-            if self._debug_log:
+        if self._was_takeover_active and not takeover_active:
+            self._sync_smooth_target_to_current_pose()
+            self._clear_direct_pose_target()
+            self._set_takeover_direct_gate(False)
+            if self._chunk_active:
+                self._hold_until_chunk_end = True
+            if self._chunk_active and self._debug_log:
                 self._logger.info(
                     "X1 takeover wrapper mode exit inside chunk: chunk_step=%s; holding until boundary",
                     self._chunk_step_index,
                 )
         if takeover_active and not self._was_takeover_active:
+            self._set_takeover_direct_gate(True)
+            self._reset_direct_pose_baseline()
+            self._hold_until_chunk_end = False
             self._takeover_sync_hold_steps = 0
             if self._debug_log:
                 self._logger.info(
@@ -167,6 +210,10 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
                 time.sleep(self._slave_hold_settle_s)
             self.adapter.sync_control_plane()
             pre_step_sync_done = True
+        pose_backend = None
+        if selected_control_mode == "pose":
+            pose_backend = self._pose_backend_for_decision(decision)
+            self._set_pose_backend_override(pose_backend, decision)
         if selected_control_mode == "joint":
             obs, rew, done, truncated, info = self._step_joint(new_action)
         else:
@@ -204,6 +251,7 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
             info["executed_joint_action"] = executed_for_log
         else:
             info["executed_action"] = executed_for_log
+            info.setdefault("pose_control_backend_effective", pose_backend)
         accepted_intervention = replaced and not action_rejected
         info["intervene_flag"] = np.asarray([accepted_intervention], dtype=bool)
         if accepted_intervention and selected_control_mode == "joint":
@@ -212,15 +260,27 @@ class MasterTakeoverIntervention(gym.ActionWrapper):
             info["raw_intervene_action"] = np.asarray(new_action, dtype=np.float32)
             info["intervene_rejected"] = True
         elif accepted_intervention:
+            info["intervene_action_raw"] = np.asarray(new_action, dtype=np.float32)
             info["intervene_action"] = executed_for_log
+        info["action_source"] = decision
         info["takeover_active"] = self.adapter.is_takeover_active()
+        gate_active = self._is_takeover_direct_gate_active()
+        info["takeover_direct_gate_active"] = (
+            gate_active if gate_active is not None else bool(info["takeover_active"])
+        )
         info["takeover_chunk_hold"] = chunk_holding
         info["takeover_sync_hold"] = sync_holding
         info["master_takeover_connected"] = self.adapter.is_connected()
         return obs, rew, done, truncated, info
 
     def close(self):
-        self.adapter.close()
+        try:
+            if self._was_takeover_active or self.adapter.is_takeover_active():
+                self._sync_smooth_target_to_current_pose()
+            self._clear_direct_pose_target()
+            self._set_takeover_direct_gate(False)
+        finally:
+            self.adapter.close()
         return self.env.close()
 
     def _hold_action(self) -> np.ndarray:

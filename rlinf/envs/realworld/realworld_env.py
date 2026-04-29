@@ -285,10 +285,10 @@ class RealWorldEnv(gym.Env):
         intervene_flag = self._extract_intervene_flag(infos)
         if intervene_flag is None:
             intervene_flag = np.zeros(self.num_envs, dtype=bool)
-        if not intervene_flag.any() and "intervene_action" in infos:
-            for env_id in range(self.num_envs):
-                if infos["intervene_action"][env_id] is not None:
-                    intervene_flag[env_id] = True
+            if "intervene_action" in infos:
+                for env_id in range(self.num_envs):
+                    if infos["intervene_action"][env_id] is not None:
+                        intervene_flag[env_id] = True
 
         infos = self._record_metrics(
             step_reward,

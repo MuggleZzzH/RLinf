@@ -41,7 +41,7 @@ class X1RobotConfig:
     use_dense_reward: bool = False
     step_frequency: float = 10.0  # Max number of steps per second
     smooth_frequency: int = 50  # Frequency for smooth controller
-    pose_control_backend: str = "direct"  # "direct" or "smooth"
+    pose_control_backend: str = "smooth"  # "smooth" or "direct"
     direct_publish_hz: float = 100.0
     direct_pose_limiter_enabled: bool = False
     direct_max_xyz_step: float = 0.015
@@ -130,6 +130,9 @@ class X1Env(gym.Env):
         self.config = config
         self.hardware_info = hardware_info
         self.env_idx = env_idx
+        self._pose_control_backend_override: str | None = None
+        self._pose_control_action_source: str | None = None
+        self._takeover_direct_gate_enabled = False
         self.node_rank = 0
         self.env_worker_rank = 0
         if worker_info is not None:
@@ -816,14 +819,57 @@ class X1Env(gym.Env):
             [self._x1_state.follow1_pos, self._x1_state.follow2_pos]
         ).astype(np.float32, copy=True)
 
+    def set_pose_control_backend_override(self, backend: str, source: str) -> None:
+        backend = str(backend).lower()
+        if backend not in {"smooth", "direct"}:
+            raise ValueError(
+                "pose control backend override must be one of {'smooth', 'direct'}, "
+                f"got {backend!r}."
+            )
+        self._pose_control_backend_override = backend
+        self._pose_control_action_source = str(source)
+
+    def _consume_pose_control_backend_override(self) -> tuple[str, str]:
+        backend = getattr(self, "_pose_control_backend_override", None)
+        source = getattr(self, "_pose_control_action_source", None)
+        self._pose_control_backend_override = None
+        self._pose_control_action_source = None
+        return backend or str(self.config.pose_control_backend), source or "policy"
+
+    def set_takeover_direct_gate(self, enabled: bool) -> None:
+        self._takeover_direct_gate_enabled = bool(enabled)
+        if not self.config.is_dummy:
+            self._controller.set_takeover_direct_gate(bool(enabled)).wait()
+
+    def is_takeover_direct_gate_active(self) -> bool:
+        return bool(self._takeover_direct_gate_enabled)
+
+    def clear_direct_pose_target(self) -> None:
+        if not self.config.is_dummy:
+            self._controller.clear_direct_pose_target().wait()
+
+    def reset_direct_pose_baseline_to_current(self) -> np.ndarray:
+        pose = self.get_arm_pose_snapshot().reshape(-1).astype(np.float32, copy=True)
+        self._last_published_action = pose.copy()
+        return pose
+
+    def sync_smooth_target_to_current_pose(self) -> np.ndarray:
+        if not self.config.is_dummy:
+            self._x1_state = self._controller.sync_smooth_target_to_current_pose().wait()[
+                0
+            ]
+        return self.get_arm_pose_snapshot()
+
     def hold_current_pose_for_takeover(self) -> dict[str, np.ndarray]:
         """Hard-hold current dual-arm pose before master takeover alignment."""
         if not self.config.is_dummy:
             self._x1_state = self._controller.hold_current_pose().wait()[0]
+        pose = np.stack([self._x1_state.follow1_pos, self._x1_state.follow2_pos]).astype(
+            np.float32, copy=True
+        )
+        self._last_published_action = pose.reshape(-1).copy()
         return {
-            "pose": np.stack(
-                [self._x1_state.follow1_pos, self._x1_state.follow2_pos]
-            ).astype(np.float32, copy=True),
+            "pose": pose,
             "joint": np.stack(
                 [self._x1_state.follow1_joints, self._x1_state.follow2_joints]
             ).astype(np.float32, copy=True),

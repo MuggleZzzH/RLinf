@@ -129,12 +129,19 @@ env:
       accept_timeout_s: 0.1
       reconnect_sleep_s: 0.1
       debug_log: True
+    keyboard_running_mode:
+      enabled: True
+      running_mode_param: "/running_mode"
+      normal_key: "1"
+      takeover_key: "2"
+      debounce_s: 0.3
     override_cfg:
       task_description: "fold the towel"
       use_arm_ids: [0, 1]
       use_camera_ids: [0, 1, 2]
       enforce_gripper_close: false
       step_frequency: 60.0
+      pose_control_backend: smooth
       direct_publish_hz: 100.0
       direct_pose_limiter_enabled: true
       direct_max_xyz_step: 0.015
@@ -173,6 +180,7 @@ env:
       use_camera_ids: [0, 1, 2]
       enforce_gripper_close: false
       step_frequency: 60.0
+      pose_control_backend: smooth
       direct_publish_hz: 100.0
       reset_command_interval: 0.02
       reset_min_interpolation_steps: 75

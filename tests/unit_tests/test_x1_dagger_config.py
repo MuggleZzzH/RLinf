@@ -48,7 +48,12 @@ def test_x1_fold_towel_dagger_config_composes(monkeypatch):
     assert cfg.env.train.master_takeover.control_mode == "pose"
     assert cfg.env.train.master_takeover.max_pose_age_s == 0.25
     assert cfg.env.train.master_takeover.max_joint_age_s == 0.25
+    assert cfg.env.train.keyboard_running_mode.enabled is True
+    assert cfg.env.train.keyboard_running_mode.running_mode_param == "/running_mode"
+    assert cfg.env.train.keyboard_running_mode.normal_key == "1"
+    assert cfg.env.train.keyboard_running_mode.takeover_key == "2"
     assert cfg.env.train.override_cfg.step_frequency == 60.0
+    assert cfg.env.train.override_cfg.pose_control_backend == "smooth"
     assert cfg.env.train.override_cfg.direct_publish_hz == 100.0
     assert cfg.env.train.override_cfg.direct_pose_limiter_enabled is True
     assert cfg.env.train.override_cfg.direct_max_xyz_step == 0.015
@@ -62,6 +67,7 @@ def test_x1_fold_towel_dagger_config_composes(monkeypatch):
     assert cfg.env.train.data_collection.only_intervened is False
     assert cfg.env.train.data_collection.fps == 60
     assert cfg.env.eval.use_master_takeover is False
+    assert cfg.env.eval.override_cfg.pose_control_backend == "smooth"
 
 
 def test_x1_fold_towel_takeover_collect_config_composes(monkeypatch):
@@ -84,7 +90,12 @@ def test_x1_fold_towel_takeover_collect_config_composes(monkeypatch):
     assert cfg.env.eval.master_takeover.control_mode == "pose"
     assert cfg.env.eval.master_takeover.max_pose_age_s == 0.25
     assert cfg.env.eval.master_takeover.max_joint_age_s == 0.25
+    assert cfg.env.eval.keyboard_running_mode.enabled is True
+    assert cfg.env.eval.keyboard_running_mode.running_mode_param == "/running_mode"
+    assert cfg.env.eval.keyboard_running_mode.normal_key == "1"
+    assert cfg.env.eval.keyboard_running_mode.takeover_key == "2"
     assert cfg.env.eval.override_cfg.step_frequency == 60.0
+    assert cfg.env.eval.override_cfg.pose_control_backend == "smooth"
     assert cfg.env.eval.override_cfg.direct_publish_hz == 100.0
     assert cfg.env.eval.override_cfg.direct_pose_limiter_enabled is True
     assert cfg.env.eval.override_cfg.direct_max_xyz_step == 0.015
@@ -117,6 +128,7 @@ def test_x1_fold_towel_openpi_s2s_eval_config_enables_direct_limiter(monkeypatch
 
     assert cfg.runner.only_eval is True
     assert cfg.env.eval.action_mode == "absolute_pose"
+    assert cfg.env.eval.override_cfg.pose_control_backend == "smooth"
     assert cfg.env.eval.override_cfg.direct_pose_limiter_enabled is True
     assert cfg.env.eval.override_cfg.direct_max_xyz_step == 0.015
     assert cfg.env.eval.override_cfg.direct_max_rpy_step == 0.05
@@ -178,7 +190,7 @@ def test_x1_deploy_config_rejects_single_arm_use_arm_ids():
     from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnvConfig
     from rlinf.envs.realworld.xsquare.x1_env import X1RobotConfig
 
-    assert X1RobotConfig().pose_control_backend == "direct"
+    assert X1RobotConfig().pose_control_backend == "smooth"
     assert X1RobotConfig().direct_pose_limiter_enabled is False
 
     with pytest.raises(ValueError, match=r"use_arm_ids=\[0, 1\]"):
@@ -192,6 +204,7 @@ def test_x1_absolute_pose_step_direct_accepts_raw_action():
     env = X1DeployEnv(
         {
             "is_dummy": True,
+            "pose_control_backend": "direct",
             "use_arm_ids": [0, 1],
             "use_camera_ids": [2],
             "enforce_gripper_close": False,
@@ -206,6 +219,8 @@ def test_x1_absolute_pose_step_direct_accepts_raw_action():
     _, _, _, _, info = env.step_absolute_pose(action)
 
     assert info["pose_control_backend"] == "direct"
+    assert info["pose_control_backend_effective"] == "direct"
+    assert info["action_source"] == "policy"
     assert info["action_rejected"] is False
     assert info["rejection_reason"] is None
     assert info["action_clipped"] is False
@@ -223,6 +238,7 @@ def test_x1_absolute_pose_step_direct_limiter_bounds_large_pose_jump():
     env = X1DeployEnv(
         {
             "is_dummy": True,
+            "pose_control_backend": "direct",
             "use_arm_ids": [0, 1],
             "use_camera_ids": [2],
             "enforce_gripper_close": False,
@@ -268,6 +284,7 @@ def test_x1_absolute_pose_step_direct_limiter_uses_shortest_rpy_delta():
     env = X1DeployEnv(
         {
             "is_dummy": True,
+            "pose_control_backend": "direct",
             "use_arm_ids": [0, 1],
             "use_camera_ids": [2],
             "enforce_gripper_close": False,
@@ -312,6 +329,7 @@ def test_x1_absolute_pose_step_direct_rejects_out_of_bounds_without_publish():
     env = X1DeployEnv(
         {
             "is_dummy": True,
+            "pose_control_backend": "direct",
             "use_arm_ids": [0, 1],
             "use_camera_ids": [2],
             "enforce_gripper_close": False,
@@ -345,6 +363,7 @@ def test_x1_absolute_pose_step_direct_rejects_bad_shape():
     env = X1DeployEnv(
         {
             "is_dummy": True,
+            "pose_control_backend": "direct",
             "use_arm_ids": [0, 1],
             "use_camera_ids": [2],
             "enforce_gripper_close": False,
@@ -356,6 +375,34 @@ def test_x1_absolute_pose_step_direct_rejects_bad_shape():
     assert info["action_rejected"] is True
     assert info["rejection_reason"] == "invalid_shape:(13,)"
     assert info["executed_action"].shape == (14,)
+
+
+def test_x1_pose_backend_override_is_one_step():
+    sys.modules.setdefault("cv2", types.ModuleType("cv2"))
+    from rlinf.envs.realworld.xsquare.tasks.deploy_env import X1DeployEnv
+
+    env = X1DeployEnv(
+        {
+            "is_dummy": True,
+            "use_arm_ids": [0, 1],
+            "use_camera_ids": [2],
+            "enforce_gripper_close": False,
+            "ee_pose_limit_min": [[-1.0] * 6, [-1.0] * 6],
+            "ee_pose_limit_max": [[1.0] * 6, [1.0] * 6],
+            "gripper_width_limit_min": 0.0,
+            "gripper_width_limit_max": 5.0,
+        }
+    )
+    action = np.array([0.1] * 6 + [0.7] + [-0.1] * 6 + [0.8], dtype=np.float32)
+
+    env.set_pose_control_backend_override("direct", "expert")
+    _, _, _, _, direct_info = env.step_absolute_pose(action)
+    _, _, _, _, smooth_info = env.step_absolute_pose(action)
+
+    assert direct_info["pose_control_backend_effective"] == "direct"
+    assert direct_info["action_source"] == "expert"
+    assert smooth_info["pose_control_backend_effective"] == "smooth"
+    assert smooth_info["action_source"] == "policy"
 
 
 def test_x1_reset_next_step_bounds_large_pose_jumps():

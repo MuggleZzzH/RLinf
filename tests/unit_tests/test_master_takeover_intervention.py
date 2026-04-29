@@ -103,6 +103,12 @@ class DummyTakeoverEnv(gym.Env):
         self.action_rejected = action_rejected
         self.executed_joint_action = None
         self.last_joint_action = None
+        self.backend_overrides = []
+        self.takeover_gate_events = []
+        self.hook_events = []
+        self.direct_baseline_reset_count = 0
+        self.smooth_target_sync_count = 0
+        self.clear_direct_target_count = 0
 
     def step(self, action):
         if self.events is not None:
@@ -140,6 +146,28 @@ class DummyTakeoverEnv(gym.Env):
     def get_arm_pose_snapshot(self):
         return self.pose_snapshot
 
+    def set_pose_control_backend_override(self, backend, source):
+        self.backend_overrides.append((backend, source))
+
+    def set_takeover_direct_gate(self, enabled):
+        self.takeover_gate_events.append(bool(enabled))
+
+    def is_takeover_direct_gate_active(self):
+        return self.takeover_gate_events[-1] if self.takeover_gate_events else False
+
+    def clear_direct_pose_target(self):
+        self.clear_direct_target_count += 1
+        self.hook_events.append("clear_direct_target")
+
+    def reset_direct_pose_baseline_to_current(self):
+        self.direct_baseline_reset_count += 1
+        return self.pose_snapshot.reshape(-1).copy()
+
+    def sync_smooth_target_to_current_pose(self):
+        self.smooth_target_sync_count += 1
+        self.hook_events.append("sync_smooth")
+        return self.pose_snapshot.copy()
+
     def hold_current_pose_for_takeover(self):
         if self.events is not None:
             self.events.append("hard_hold")
@@ -162,6 +190,9 @@ def test_master_takeover_mode_1_passes_policy_action():
     assert info["intervene_flag"].shape == (1,)
     assert not info["intervene_flag"].item()
     assert "intervene_action" not in info
+    assert info["action_source"] == "policy"
+    assert info["pose_control_backend_effective"] == "smooth"
+    assert env.backend_overrides == [("smooth", "policy")]
 
 
 def test_master_takeover_mode_2_without_fresh_pose_holds_current_pose():
@@ -181,6 +212,12 @@ def test_master_takeover_mode_2_without_fresh_pose_holds_current_pose():
     assert not info["takeover_chunk_hold"]
     assert not info["intervene_flag"].item()
     assert "intervene_action" not in info
+    assert info["action_source"] == "sync_hold"
+    assert info["pose_control_backend_effective"] == "direct"
+    assert info["takeover_direct_gate_active"]
+    assert env.backend_overrides == [("direct", "sync_hold")]
+    assert env.takeover_gate_events == [True]
+    assert env.direct_baseline_reset_count == 1
     assert events == ["poll", "hard_hold", "sync", "env_step"]
 
 
@@ -208,7 +245,12 @@ def test_master_takeover_mode_2_fresh_pose_overrides_policy_action():
     np.testing.assert_array_equal(env.last_action, expert)
     np.testing.assert_array_equal(info["executed_action"], expert)
     np.testing.assert_array_equal(info["intervene_action"], expert)
+    np.testing.assert_array_equal(info["intervene_action_raw"], expert)
     assert info["intervene_flag"].item()
+    assert info["action_source"] == "expert"
+    assert info["pose_control_backend_effective"] == "direct"
+    assert info["takeover_direct_gate_active"]
+    assert env.backend_overrides == [("direct", "expert")]
 
 
 def test_master_takeover_records_post_clip_executed_action_as_expert():
@@ -224,6 +266,7 @@ def test_master_takeover_records_post_clip_executed_action_as_expert():
     np.testing.assert_array_equal(env.last_action, expert)
     np.testing.assert_array_equal(info["executed_action"], executed)
     np.testing.assert_array_equal(info["intervene_action"], executed)
+    np.testing.assert_array_equal(info["intervene_action_raw"], expert)
     assert info["intervene_flag"].item()
 
 
@@ -242,6 +285,7 @@ def test_master_takeover_rejected_pose_does_not_write_expert_label():
     assert info["intervene_rejected"] is True
     assert not info["intervene_flag"].item()
     assert "intervene_action" not in info
+    assert "intervene_action_raw" not in info
 
 
 def test_master_takeover_joint_mode_calls_step_joint_without_pose_label():
@@ -283,11 +327,44 @@ def test_master_takeover_holds_after_takeover_until_chunk_boundary():
     assert hold_info["takeover_chunk_hold"]
     assert not hold_info["takeover_sync_hold"]
     assert not hold_info["intervene_flag"].item()
+    assert hold_info["action_source"] == "chunk_hold"
+    assert hold_info["pose_control_backend_effective"] == "smooth"
+    assert not hold_info["takeover_direct_gate_active"]
+    assert env.backend_overrides == [("direct", "expert"), ("smooth", "chunk_hold")]
+    assert env.takeover_gate_events == [True, False]
+    assert env.smooth_target_sync_count == 1
+    assert env.clear_direct_target_count == 1
+    assert env.hook_events == ["sync_smooth", "clear_direct_target"]
 
     wrapped.end_action_chunk()
     policy_after_boundary = np.full(14, 4.0, dtype=np.float32)
     wrapped.step(policy_after_boundary)
     np.testing.assert_array_equal(env.last_action, policy_after_boundary)
+
+
+def test_master_takeover_exit_outside_chunk_releases_gate_without_chunk_hold():
+    env = DummyTakeoverEnv()
+    expert = np.full(14, 3.0, dtype=np.float32)
+    adapter = FakeTakeoverAdapter(
+        states=[
+            (True, expert),
+            (False, None),
+        ]
+    )
+    wrapped = MasterTakeoverIntervention(env, adapter=adapter)
+
+    wrapped.step(np.ones(14, dtype=np.float32))
+    policy = np.full(14, 2.0, dtype=np.float32)
+    _, _, _, _, info = wrapped.step(policy)
+
+    np.testing.assert_array_equal(env.last_action, policy)
+    assert info["action_source"] == "policy"
+    assert not info["takeover_chunk_hold"]
+    assert env.takeover_gate_events == [True, False]
+    assert env.smooth_target_sync_count == 1
+    assert env.clear_direct_target_count == 1
+    assert env.hook_events == ["sync_smooth", "clear_direct_target"]
+    assert env.backend_overrides == [("direct", "expert"), ("smooth", "policy")]
 
 
 def test_master_takeover_rejects_bad_joint_snapshot_shape():

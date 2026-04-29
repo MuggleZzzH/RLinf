@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import pickle
+import types
 
 import gymnasium as gym
 import numpy as np
@@ -39,6 +40,46 @@ class OneStepCollectionEnv(gym.Env):
             info["executed_action"] = np.asarray([7.0], dtype=np.float32)
         info["success"] = self.success
         return {"state": np.ones((1, 1), dtype=np.float32)}, 0.0, True, False, info
+
+
+class ExplicitFalseInterveneEnv:
+    def step(self, action):
+        obs = {
+            "state": {"tcp_pose": np.zeros((1, 1), dtype=np.float32)},
+            "frames": {"main": np.zeros((1, 4, 4, 3), dtype=np.uint8)},
+        }
+        infos = {
+            "intervene_flag": np.asarray([False], dtype=bool),
+            "intervene_action": [np.asarray([9.0], dtype=np.float32)],
+        }
+        return (
+            obs,
+            np.asarray([0.0], dtype=np.float32),
+            np.asarray([False], dtype=bool),
+            np.asarray([False], dtype=bool),
+            infos,
+        )
+
+
+def test_realworld_step_respects_explicit_false_intervene_flag():
+    from rlinf.envs.realworld.realworld_env import RealWorldEnv
+
+    env = RealWorldEnv.__new__(RealWorldEnv)
+    env.cfg = types.SimpleNamespace(max_episode_steps=10)
+    env.num_envs = 1
+    env.env = ExplicitFalseInterveneEnv()
+    env._elapsed_steps = np.zeros(1, dtype=np.int32)
+    env.manual_episode_control_only = False
+    env.ignore_terminations = False
+    env.auto_reset = False
+    env.main_image_key = "main"
+    env.task_descriptions = ["test"]
+    env._init_metrics()
+
+    _, _, _, _, infos = env.step(np.zeros((1, 1), dtype=np.float32), auto_reset=False)
+
+    assert not bool(infos["intervene_flag"].item())
+    assert not bool(infos["episode"]["intervened_once"].item())
 
 
 def test_collect_episode_only_intervened_skips_non_intervened(tmp_path):

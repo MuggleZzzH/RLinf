@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import types
 
 import numpy as np
@@ -23,9 +24,33 @@ import numpy as np
 class FakeArmsController:
     def __init__(self):
         self.commands = []
+        self.arm_positions = [
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7],
+        ]
+        self.joint_positions = [[0.0] * 7, [0.0] * 7]
+        self.current_data = [[0.0] * 7, [0.0] * 7]
 
     def arms_control(self, left, right):
         self.commands.append((list(left), list(right)))
+
+    def arms_data(self):
+        return self.arm_positions
+
+    def arms_joint_data(self):
+        return self.joint_positions
+
+    def arms_cur_data(self):
+        return self.current_data
+
+    def head_data(self):
+        return [0.0, 0.0]
+
+    def lift_data(self):
+        return 0.0
+
+    def chassis_pose_data(self):
+        return [0.0, 0.0, 0.0]
 
 
 class FakeJointPublisher:
@@ -119,6 +144,10 @@ def _make_controller(
     controller.debug_pose_control = False
     controller.debug_gripper_control = False
     controller.pose_control_backend = "smooth"
+    controller._takeover_direct_gate = threading.Event()
+    controller._direct_pose_target = None
+    controller._direct_pose_left_target = None
+    controller._direct_pose_right_target = None
     controller.xyz_speed = 0.5
     controller.rpy_speed = 1.5
     controller.freq = 50
@@ -243,6 +272,22 @@ def test_direct_controller_smooth_callback_returns_without_publishing(monkeypatc
     assert controller.controller.commands == []
 
 
+def test_takeover_gate_suppresses_smooth_callback(monkeypatch):
+    controller_cls = _load_controller_class(monkeypatch)
+    controller = _make_controller(
+        controller_cls,
+        left_current=[0, 0, 0, 0, 0, 0, 0.0],
+        right_current=[0, 0, 0, 0, 0, 0, 0.0],
+        left_target=[0.2, 0, 0, 0, 0, 0, 1.0],
+        right_target=[0.2, 0, 0, 0, 0, 0, 2.0],
+    )
+    controller.set_takeover_direct_gate(True)
+
+    controller.smooth_action_callback(None)
+
+    assert controller.controller.commands == []
+
+
 def test_direct_controller_move_arm_publishes_pos_cmd(monkeypatch):
     controller_cls = _load_controller_class(monkeypatch)
     controller = controller_cls.__new__(controller_cls)
@@ -250,6 +295,7 @@ def test_direct_controller_move_arm_publishes_pos_cmd(monkeypatch):
     controller._direct_pose_msg_cls = FakePosCmd
     controller._direct_pose_left_pub = FakeJointPublisher()
     controller._direct_pose_right_pub = FakeJointPublisher()
+    controller._direct_pose_target = None
     controller._direct_pose_left_target = None
     controller._direct_pose_right_target = None
     left = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
@@ -283,23 +329,90 @@ def test_direct_controller_move_arm_publishes_pos_cmd(monkeypatch):
     ] == right
     assert left_msg.mode1 == 0
     assert left_msg.mode2 == 0
+    assert controller._direct_pose_target == (tuple(left), tuple(right))
 
 
-def test_direct_controller_timer_republishes_latest_pose(monkeypatch):
+def test_sync_smooth_target_to_current_pose_resets_targets(monkeypatch):
+    controller_cls = _load_controller_class(monkeypatch)
+    controller = _make_controller(
+        controller_cls,
+        left_current=[0, 0, 0, 0, 0, 0, 0.0],
+        right_current=[0, 0, 0, 0, 0, 0, 0.0],
+        left_target=[0.2, 0, 0, 0, 0, 0, 1.0],
+        right_target=[0.2, 0, 0, 0, 0, 0, 2.0],
+    )
+    controller.controller.arm_positions = [
+        [0.3, 0.2, 0.1, 0.4, 0.5, 0.6, 0.7],
+        [1.3, 1.2, 1.1, 1.4, 1.5, 1.6, 1.7],
+    ]
+
+    controller.sync_smooth_target_to_current_pose()
+
+    np.testing.assert_allclose(
+        controller.left_arm_target,
+        controller.controller.arm_positions[0],
+    )
+    np.testing.assert_allclose(
+        controller.right_arm_target,
+        controller.controller.arm_positions[1],
+    )
+    np.testing.assert_allclose(
+        controller.last_expected_xyz1,
+        np.asarray(controller.controller.arm_positions[0][:3], dtype=np.float32),
+    )
+    np.testing.assert_allclose(
+        controller.last_expected_rpy2,
+        np.asarray(controller.controller.arm_positions[1][3:6], dtype=np.float32),
+    )
+
+
+def test_direct_controller_timer_requires_gate_before_republishing_latest_pose(
+    monkeypatch,
+):
     controller_cls = _load_controller_class(monkeypatch)
     controller = controller_cls.__new__(controller_cls)
-    controller.pose_control_backend = "direct"
+    controller.pose_control_backend = "smooth"
+    controller._takeover_direct_gate = threading.Event()
     controller._direct_pose_msg_cls = FakePosCmd
     controller._direct_pose_left_pub = FakeJointPublisher()
     controller._direct_pose_right_pub = FakeJointPublisher()
     left = [0.1] * 7
     right = [0.2] * 7
-    controller._direct_pose_left_target = left
-    controller._direct_pose_right_target = right
+    controller._direct_pose_target = (tuple(left), tuple(right))
+    controller._direct_pose_left_target = tuple(left)
+    controller._direct_pose_right_target = tuple(right)
 
+    controller.direct_pose_callback(None)
+
+    assert controller._direct_pose_left_pub.messages == []
+    assert controller._direct_pose_right_pub.messages == []
+
+    controller.set_takeover_direct_gate(True)
     controller.direct_pose_callback(None)
 
     assert len(controller._direct_pose_left_pub.messages) == 1
     assert len(controller._direct_pose_right_pub.messages) == 1
     assert controller._direct_pose_left_pub.messages[0].x == 0.1
     assert controller._direct_pose_right_pub.messages[0].gripper == 0.2
+
+
+def test_clear_direct_pose_target_prevents_timer_publish(monkeypatch):
+    controller_cls = _load_controller_class(monkeypatch)
+    controller = controller_cls.__new__(controller_cls)
+    controller.pose_control_backend = "smooth"
+    controller._takeover_direct_gate = threading.Event()
+    controller._takeover_direct_gate.set()
+    controller._direct_pose_msg_cls = FakePosCmd
+    controller._direct_pose_left_pub = FakeJointPublisher()
+    controller._direct_pose_right_pub = FakeJointPublisher()
+    controller._direct_pose_target = (tuple([0.1] * 7), tuple([0.2] * 7))
+    controller._direct_pose_left_target = tuple([0.1] * 7)
+    controller._direct_pose_right_target = tuple([0.2] * 7)
+
+    controller.clear_direct_pose_target()
+    controller.direct_pose_callback(None)
+
+    assert controller._direct_pose_target is None
+    assert controller._direct_pose_left_target is None
+    assert controller._direct_pose_right_target is None
+    assert controller._direct_pose_left_pub.messages == []
