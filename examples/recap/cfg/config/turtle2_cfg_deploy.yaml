@@ -1,0 +1,35 @@
+# XSquare X1 (Turtle2) Robot - CFG Deployment Configuration
+# Usage: python examples/recap/cfg/deploy_cfg.py --config-name turtle2_cfg_deploy
+
+defaults:
+  - model/pi0@actor.model
+  - _self_
+
+actor:
+  model:
+    # Path to the trained RECAP checkpoint (CFG model)
+    model_path: "/mnt/public/songsiqi/data/import_checkpoint/fold_towel_gqy_03170318_s2s_a30/29999/29999"
+    model_type: "cfg_model"
+    precision: "bfloat16"
+    openpi:
+      config_name: "pi0_turtle2_x2robot_s2m"
+      robot_type: "turtle2"
+      # Guidance scale: 1.0 is standard, >1.0 extrapolates towards positive advantage
+      cfgrl_guidance_scale: 1.5
+      # Deployment always uses positive guidance
+      guidance_type: "positive"
+
+# Environment configuration for Turtle2 deployment
+env:
+  train:
+    env_type: "turtle2"
+    # Registry name for deployment environment
+    task_name: "Turtle2DeployEnv-v1"
+  eval:
+    env_type: "turtle2"
+    task_name: "Turtle2DeployEnv-v1"
+
+# Controller and smoothing parameters from X1 integration
+controller:
+  smoothing_factor: 0.1
+  action_exec_horizon: 1

@@ -33,7 +33,11 @@ from lerobot.common.datasets.lerobot_dataset import (
 from openpi.transforms import DataTransformFn
 from torch.utils.data import Dataset
 
-from rlinf.models.embodiment.openpi.policies import franka_policy, libero_policy
+from rlinf.models.embodiment.openpi.policies import (
+    franka_policy,
+    libero_policy,
+    x2robot_policy,
+)
 
 from .common import BaseDataLoaderImpl, ReCapMixtureDataset
 from .utils import (
@@ -75,6 +79,14 @@ _REPACK_KEYS = {
         "observation/image": "image",
         "observation/wrist_image": "wrist_image",
         "observation/state": "state",
+        "actions": "actions",
+        "prompt": "prompt",
+    },
+    "turtle2": {
+        "face_view": "face_view",
+        "left_wrist_view": "left_wrist_view",
+        "right_wrist_view": "right_wrist_view",
+        "state": "state",
         "actions": "actions",
         "prompt": "prompt",
     },
@@ -323,6 +335,23 @@ class ValueDataset(Dataset):
                 franka_policy.FrankaEEInputs(
                     action_dim=action_dim,
                     model_type=model_type_enum,
+                )
+            )
+        elif robot == "turtle2":
+            # X2RobotInputs expects images to be in a nested dict 'images'
+            def repack_to_nested_images(data: dict) -> dict:
+                data = dict(data)
+                data["images"] = {
+                    "face_view": data.pop("face_view"),
+                    "left_wrist_view": data.pop("left_wrist_view"),
+                    "right_wrist_view": data.pop("right_wrist_view"),
+                }
+                return data
+
+            transforms_list.append(repack_to_nested_images)
+            transforms_list.append(
+                x2robot_policy.X2RobotInputs(
+                    action_dim=14,  # Physical action dim for turtle2
                 )
             )
 

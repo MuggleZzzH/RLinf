@@ -55,10 +55,10 @@ class LeRobotX2RobotDataConfig(DataConfigFactory):
     def create(
         self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig
     ) -> DataConfig:
-        if self.mode != "s2s":
+        if self.mode not in ("s2s", "s2m"):
             raise ValueError(
                 "RLinf Turtle2/X2Robot OpenPI integration currently supports only "
-                f"mode='s2s', got {self.mode!r}."
+                f"mode='s2s' or 's2m', got {self.mode!r}."
             )
 
         data_transforms = _transforms.Group(

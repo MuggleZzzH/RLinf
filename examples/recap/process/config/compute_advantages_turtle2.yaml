@@ -1,0 +1,73 @@
+# Advantage computation for XSquare X1 (Turtle2) Robot
+# Adaptation Step: Step 3
+
+data:
+  # NOTE: compute_advantages.py currently does not support data_root. 
+  # We use absolute paths for dataset_path to ensure stats.json can be found.
+  # data_root: /mnt/public/songsiqi/data/lerobot
+
+  model_type: "pi0"
+  robot_type: "turtle2"
+
+  # [Required] List of datasets to process
+  train_data_paths:
+    # --- 1. Expert Demonstrations (SFT Type) ---
+    - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260317_pm_tele_s2m
+      type: sft
+      robot_type: "turtle2"
+    - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260318_pm_tele_s2m
+      type: sft
+      robot_type: "turtle2"
+    - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260410_pm_tele_s2m
+      type: sft
+      robot_type: "turtle2"
+    - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260420_pm_tele_s2m
+      type: sft
+      robot_type: "turtle2"
+
+    # --- 2. Real-world Rollouts (Rollout Type) ---
+    - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260325_pm_rollout_s2m
+      type: rollout
+      robot_type: "turtle2"
+    - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260330_pm_rollout_s2m
+      type: rollout
+      robot_type: "turtle2"
+    - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260407_pm_rollout_s2m
+      type: rollout
+      robot_type: "turtle2"
+
+  # N in: A = normalize(r_{t:t+N}) + gamma^N * V(o_{t+N}) - V(o_t)
+  advantage_lookahead_step: 10
+  gamma: 1.0
+
+advantage:
+  # [Required] Checkpoint of the value model from Step 2
+  value_checkpoint: /home/songsiqi/workspace/jiahao-rlinf/logs/value_sft/turtle2_sft_value-20260429-11:42:08/turtle2_value_sft/checkpoints/global_step_3000/actor/model_state_dict
+
+  model:
+    # Value model architecture configuration
+    critic_expert_variant: "gemma_1m"  # Should match SFT training
+    tokenizer_path: /mnt/public/datasets/pretrained-checkpoints/gemma-3-270m
+    siglip_path: /mnt/public/datasets/pretrained-checkpoints/siglip2-so400m-patch14-224
+    gemma3_path: /mnt/public/datasets/pretrained-checkpoints/gemma-3-270m
+
+  # [Required] Advantage type (GAE or simple)
+  adv_type: "gae"
+  lambd: 0.95
+  
+  # Positive advantage quantile (q in RECAP)
+  positive_quantile: 0.3
+  
+  # Returns sidecar tag (from Step 1)
+  returns_tag: "turtle2_v1"
+  
+  # Output file tag
+  tag: "turtle2_v1_N10_q30"
+
+  # Hardware and inference
+  device: "cuda"
+  batch_size: 32  # This is the micro-batch size for inference
+  num_dataloader_workers_per_gpu: 8
+
+# Use a subset of GPUs (e.g., 4-7) for inference
+# Run with: CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --nproc_per_node=4 compute_advantages.py ...

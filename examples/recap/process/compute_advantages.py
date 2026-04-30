@@ -217,6 +217,14 @@ KEY_MAPPINGS = {
         "observation.gripper_position": "observation/gripper_position",
         "task": "prompt",
     },
+    "turtle2": {
+        "face_view": "face_view",
+        "left_wrist_view": "left_wrist_view",
+        "right_wrist_view": "right_wrist_view",
+        "state": "state",
+        "actions": "actions",
+        "task": "prompt",
+    },
 }
 
 

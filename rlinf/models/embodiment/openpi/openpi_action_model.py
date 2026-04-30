@@ -37,6 +37,7 @@ from rlinf.utils.nested_dict_process import copy_dict_tensor
 class OpenPi0Config(Pi0Config):
     # config for rl
     config_name: str = "pi0_libero"  # pi0_libero, pi05_libero, pi0_maniskill, pi05_maniskill, pi0_metaworld, pi05_metaworld
+    robot_type: str = "libero"
     num_images_in_input: int = 2  # number of images in input
     noise_method: str = "flow_sde"  # flow_ode, flow_sde, flow_noise, flow_cps
     # noise config for flow-sde
@@ -474,7 +475,7 @@ class OpenPi0ForRLActionPrediction(PI0Pytorch, BasePolicy):
         return result
 
     def obs_processor(self, env_obs):
-        if "x2robot" in self.config.config_name:
+        if self.config.robot_type == "turtle2":
             extra_view_images = env_obs.get("extra_view_images")
             if extra_view_images is None or extra_view_images.shape[1] < 2:
                 raise ValueError(

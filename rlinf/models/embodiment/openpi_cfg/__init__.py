@@ -75,7 +75,7 @@ def get_model(cfg: DictConfig, torch_dtype=None):
         raise ValueError("Asset id is required to load norm stats.")
     norm_stats = _checkpoints.load_norm_stats(checkpoint_dir, data_config.asset_id)
 
-    repack_transforms = transforms.Group()
+    repack_transforms = data_config.repack_transforms
     default_prompt = None
     model.setup_wrappers(
         transforms=[

@@ -151,7 +151,11 @@ def build_input_transforms(
     import openpi.models.model as _openpi_model
     import openpi.transforms as _openpi_transforms
 
-    from rlinf.models.embodiment.openpi.policies import franka_policy, libero_policy
+    from rlinf.models.embodiment.openpi.policies import (
+        franka_policy,
+        libero_policy,
+        x2robot_policy,
+    )
 
     _mt_map = {
         "pi0": _openpi_model.ModelType.PI0,
@@ -171,6 +175,26 @@ def build_input_transforms(
         input_transforms.append(
             franka_policy.FrankaEEInputs(
                 action_dim=action_dim, model_type=model_type_enum
+            )
+        )
+
+    elif env_type == "turtle2":
+        input_transforms.append(_openpi_transforms.InjectDefaultPrompt(default_prompt))
+        # Turtle2 expects nested images dict
+        repack_keys = {
+            "images": {
+                "face_view": "face_view",
+                "left_wrist_view": "left_wrist_view",
+                "right_wrist_view": "right_wrist_view",
+            },
+            "state": "state",
+            "actions": "actions",
+            "prompt": "prompt",
+        }
+        input_transforms.append(_openpi_transforms.RepackTransform(repack_keys))
+        input_transforms.append(
+            x2robot_policy.X2RobotInputs(
+                action_dim=14,
             )
         )
 

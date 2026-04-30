@@ -52,7 +52,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from matplotlib.animation import FFMpegWriter, FuncAnimation
 from tqdm import tqdm
 
@@ -106,13 +106,10 @@ def detect_image_keys(sample: dict) -> list[str]:
     image_keys = []
     for key in sample.keys():
         # Support both naming conventions
-        if key.startswith("observation.images.") or key in [
-            "image",
-            "wrist_image",
-            "front_image",
-            "left_image",
-            "right_image",
-        ]:
+        if (
+            key.startswith("observation.images.")
+            or any(k in key.lower() for k in ["image", "view", "camera"])
+        ):
             val = sample[key]
             arr = to_numpy(val)
             # Check if it looks like an image (3D or 4D with channel dim)

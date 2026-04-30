@@ -163,6 +163,7 @@ def compute_cfg_routing_masks(
 @dataclass(frozen=True)
 class OpenPi0Config(Pi0Config):
     config_name: str = "pi0_libero"
+    robot_type: str = "libero"
     num_images_in_input: int = 2
     action_chunk: int = 5
     action_env_dim: int = 7
@@ -601,10 +602,40 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
         return flow_loss, metrics
 
     def obs_processor(self, env_obs):
-        processed_obs = {
-            "observation/image": env_obs["main_images"],
-            "prompt": env_obs["task_descriptions"],
-        }
+        if self.config.robot_type == "turtle2":
+            extra_view_images = env_obs.get("extra_view_images")
+            if extra_view_images is None or extra_view_images.shape[1] < 2:
+                raise ValueError(
+                    "x2robot OpenPI configs require extra_view_images with "
+                    "left/right wrist views."
+                )
+            processed_obs = {
+                "images": {
+                    "left_wrist_view": extra_view_images[:, 0],
+                    "face_view": env_obs["main_images"],
+                    "right_wrist_view": extra_view_images[:, 1],
+                },
+                "state": env_obs["states"],
+                "prompt": env_obs["task_descriptions"],
+            }
+        else:
+            processed_obs = {
+                "observation/image": env_obs["main_images"],
+                "prompt": env_obs["task_descriptions"],
+            }
+            if "calvin" in self.config.config_name:
+                state = env_obs["states"]
+                processed_obs["observation/state_ee_pos"] = state[:, :3]
+                processed_obs["observation/state_ee_rot"] = state[:, 3:6]
+                processed_obs["observation/state_gripper"] = state[:, 6:7]
+            else:
+                state = env_obs["states"]
+                if torch.is_tensor(state):
+                    state = state.to(dtype=torch.float32)
+                processed_obs["observation/state"] = state
+            if env_obs["wrist_images"] is not None:
+                processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
+
         positive_guidance_prompt = [
             f"{desc}\nAdvantage: positive" for desc in env_obs["task_descriptions"]
         ]
@@ -613,18 +644,6 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
         ]
         processed_obs["positive_guidance_prompt"] = positive_guidance_prompt
         processed_obs["negative_guidance_prompt"] = negative_guidance_prompt
-        if "calvin" in self.config.config_name:
-            state = env_obs["states"]
-            processed_obs["observation/state_ee_pos"] = state[:, :3]
-            processed_obs["observation/state_ee_rot"] = state[:, 3:6]
-            processed_obs["observation/state_gripper"] = state[:, 6:7]
-        else:
-            state = env_obs["states"]
-            if torch.is_tensor(state):
-                state = state.to(dtype=torch.float32)
-            processed_obs["observation/state"] = state
-        if env_obs["wrist_images"] is not None:
-            processed_obs["observation/wrist_image"] = env_obs["wrist_images"]
         return processed_obs
 
     def precision_processor(self, processed_obs):

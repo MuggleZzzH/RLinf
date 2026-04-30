@@ -1,0 +1,47 @@
+data:
+  train_data_paths:
+  - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260317_pm_tele_s2m
+    type: sft
+    robot_type: turtle2
+    model_type: pi0
+  - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260318_pm_tele_s2m
+    type: sft
+    robot_type: turtle2
+    model_type: pi0
+  - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260410_pm_tele_s2m
+    type: sft
+    robot_type: turtle2
+    model_type: pi0
+  - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260420_pm_tele_s2m
+    type: sft
+    robot_type: turtle2
+    model_type: pi0
+  - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260325_pm_rollout_s2m
+    type: rollout
+    robot_type: turtle2
+    model_type: pi0
+  - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260330_pm_rollout_s2m
+    type: rollout
+    robot_type: turtle2
+    model_type: pi0
+  - dataset_path: /mnt/public/songsiqi/data/lerobot/beijing_guqiuyi_20260407_pm_rollout_s2m
+    type: rollout
+    robot_type: turtle2
+    model_type: pi0
+  return_min: null
+  return_max: null
+advantage:
+  value_checkpoint: /home/songsiqi/workspace/jiahao-rlinf/outputs/2026-04-29/11-12-11/checkpoints/global_step_1000
+  adv_type: gae
+  gamma: 1.0
+  lambd: 0.95
+  advantage_lookahead_step: 10
+  positive_quantile: 0.3
+  returns_tag: turtle2_v1
+  tag: turtle2_v1_N10_q30
+model:
+  model_type: pi0
+  critic_expert_variant: gemma_1m
+  device: cuda
+  micro_batch_size: 32
+  num_workers: 8

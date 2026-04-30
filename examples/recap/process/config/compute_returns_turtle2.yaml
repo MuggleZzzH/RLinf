@@ -1,0 +1,54 @@
+# XSquare X1 (Turtle2) Robot - Compute returns configuration
+# Adaptation Step: Step 1
+
+data:
+  # [Required] Root directory of the datasets.
+  data_root: /mnt/public/songsiqi/data/lerobot
+
+  # [Required] List of datasets to process
+  train_data_paths:
+    # --- 1. Expert Demonstrations (SFT Type) ---
+    - dataset_path: beijing_guqiuyi_20260317_pm_tele_s2m
+      type: sft
+      robot_type: "turtle2"
+    - dataset_path: beijing_guqiuyi_20260318_pm_tele_s2m
+      type: sft
+      robot_type: "turtle2"
+    - dataset_path: beijing_guqiuyi_20260410_pm_tele_s2m
+      type: sft
+      robot_type: "turtle2"
+    - dataset_path: beijing_guqiuyi_20260420_pm_tele_s2m
+      type: sft
+      robot_type: "turtle2"
+
+    # --- 2. Real-world Rollouts (Rollout Type, contains success/failure) ---
+    - dataset_path: beijing_guqiuyi_20260325_pm_rollout_s2m
+      type: rollout
+      robot_type: "turtle2"
+      failure_reward: -300.0
+    - dataset_path: beijing_guqiuyi_20260330_pm_rollout_s2m
+      type: rollout
+      robot_type: "turtle2"
+      failure_reward: -300.0
+    - dataset_path: beijing_guqiuyi_20260407_pm_rollout_s2m
+      type: rollout
+      robot_type: "turtle2"
+      failure_reward: -300.0
+
+  # Global default settings
+  dataset_type: "rollout"
+  gamma: 1.0              # Discount factor, keep at 1.0 for RECAP
+  failure_reward: -300.0   # Global failure penalty
+
+  # [Recommended] Output file tag
+  tag: "turtle2_v1"
+  
+  # Number of parallel workers for processing
+  num_workers: 64
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false
