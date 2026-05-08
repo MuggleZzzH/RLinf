@@ -617,12 +617,49 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
                 },
                 "state": env_obs["states"],
                 "prompt": env_obs["task_descriptions"],
+                "task": env_obs["task_descriptions"],
             }
+
+            # Add dummy actions and actions_is_pad for OpenPI RepackTransform
+            batch_size = env_obs["states"].shape[0]
+            device = env_obs["states"].device
+            processed_obs["actions"] = torch.zeros(
+                (
+                    batch_size,
+                    self.config.action_chunk,
+                    self.config.action_env_dim,
+                ),
+                device=device,
+                dtype=torch.float32,
+            )
+            processed_obs["actions_is_pad"] = torch.zeros(
+                (batch_size, self.config.action_chunk),
+                device=device,
+                dtype=torch.bool,
+            )
         else:
             processed_obs = {
                 "observation/image": env_obs["main_images"],
                 "prompt": env_obs["task_descriptions"],
+                "task": env_obs["task_descriptions"],
             }
+            # Add dummy actions and actions_is_pad for OpenPI RepackTransform
+            batch_size = env_obs["states"].shape[0]
+            device = env_obs["states"].device
+            processed_obs["actions"] = torch.zeros(
+                (
+                    batch_size,
+                    self.config.action_chunk,
+                    self.config.action_env_dim,
+                ),
+                device=device,
+                dtype=torch.float32,
+            )
+            processed_obs["actions_is_pad"] = torch.zeros(
+                (batch_size, self.config.action_chunk),
+                device=device,
+                dtype=torch.bool,
+            )
             if "calvin" in self.config.config_name:
                 state = env_obs["states"]
                 processed_obs["observation/state_ee_pos"] = state[:, :3]

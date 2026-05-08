@@ -9,6 +9,8 @@ defaults:
   - _self_
   - override hydra/job_logging: stdout
 
+weight_syncer: patch_syncer
+
 hydra:
   run:
     dir: .
@@ -55,6 +57,9 @@ runner:
   resume_dir: null
   ckpt_path: null
 
+algorithm:
+  adv_type: gae
+
 env:
   group_name: "EnvGroup"
   enable_offload: False
@@ -68,13 +73,13 @@ env:
     no_gripper: False
     use_spacemouse: False
     use_gello: False
-    use_master_takeover: True
+    use_master_takeover: False
     action_mode: absolute_pose
     main_image_key: wrist_2
     max_steps_per_rollout_epoch: 3000
     max_episode_steps: 3000
     data_collection:
-      enabled: True
+      enabled: False
       save_dir: ${oc.env:RLINF_REALWORLD_DATA_DIR,../results/turtle2_recap_eval_rollouts}
       export_format: "pickle"
       only_success: False
