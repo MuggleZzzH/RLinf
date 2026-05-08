@@ -228,10 +228,24 @@ class CollectEpisode(gym.Wrapper):
                 if isinstance(infos_list, (list, tuple))
                 else infos_list
             )
+            if isinstance(step_info, dict):
+                internal_action = step_info.pop("_collect_action", None)
+                if internal_action is not None:
+                    step_action = internal_action
+                internal_intervene_action = step_info.pop(
+                    "_collect_intervene_action", None
+                )
+                internal_intervene_flag = step_info.pop("_collect_intervene_flag", None)
+                if internal_intervene_action is not None:
+                    step_info["intervene_action"] = internal_intervene_action
+                    if internal_intervene_flag is not None:
+                        step_info["intervene_flag"] = internal_intervene_flag
             self._record_step(
                 step_action, step_obs, step_reward, step_term, step_trunc, step_info
             )
             self._maybe_flush(step_term, step_trunc)
+            if isinstance(infos_list, list):
+                self._strip_collect_internal_info(infos_list[step_idx])
 
         return obs_list, rewards, terminations, truncations, infos_list
 
@@ -293,9 +307,6 @@ class CollectEpisode(gym.Wrapper):
                 env_info = self._slice_copy(final_info_batch, env_idx)
                 self._pending_obs[env_idx] = self._slice_copy(obs, env_idx)
                 self._pending_info[env_idx] = self._slice_copy(info_no_reset, env_idx)
-                if "intervene_action" in env_info:
-                    env_info["intervene_action"] = env_info["intervene_action"][-1]
-                    env_info["intervene_flag"] = env_info["intervene_flag"][-1]
             else:
                 env_obs = self._slice_copy(obs, env_idx)
                 env_info = self._slice_copy(info, env_idx)
@@ -344,10 +355,7 @@ class CollectEpisode(gym.Wrapper):
             if not (done_by_term or done_by_trunc):
                 continue
             save_success = not self.only_success or (is_success and done_by_term)
-            save_intervened = (
-                not self.only_intervened or self._episode_intervened[env_idx]
-            )
-            if save_success and save_intervened:
+            if save_success:
                 self._flush_episode(env_idx, is_success)
             self._reset_env_buffer(env_idx)
 
@@ -431,6 +439,7 @@ class CollectEpisode(gym.Wrapper):
                 "final_info should not be present in the info"
             )
             info_with_intervene = copy.deepcopy(buf["infos"][i + 1])
+            np_action = self._action_with_intervention(np_action, info_with_intervene)
 
             if state is None or np_action is None:
                 continue
@@ -579,23 +588,67 @@ class CollectEpisode(gym.Wrapper):
 
     def _recorded_action(self, action, env_info, env_idx: int):
         policy_action = self._slice_copy(action, env_idx)
-        if isinstance(env_info, dict) and "executed_action" in env_info:
-            return self._copy(env_info["executed_action"])
         if (
-            self._intervene_flag_from_info(env_info)
-            and isinstance(env_info, dict)
+            isinstance(env_info, dict)
+            and self._intervene_flag_from_info(env_info)
             and "intervene_action" in env_info
-            and self._same_action_shape(env_info["intervene_action"], policy_action)
         ):
-            return self._copy(env_info["intervene_action"])
+            intervene_action = self._action_like(
+                env_info["intervene_action"], policy_action, env_idx
+            )
+            if intervene_action is not None:
+                return self._copy(intervene_action)
         return policy_action
 
-    def _same_action_shape(self, candidate, reference) -> bool:
+    def _action_with_intervention(self, np_action, env_info):
+        if np_action is None or not isinstance(env_info, dict):
+            return np_action
+        if "intervene_action" not in env_info or "intervene_flag" not in env_info:
+            return np_action
+        flag = self._to_numpy(env_info["intervene_flag"])
+        if flag is None or not np.asarray(flag, dtype=bool).reshape(-1).all():
+            return np_action
+        intervene_action = self._to_numpy(env_info["intervene_action"])
+        intervene_action = self._action_like(intervene_action, np_action)
+        if intervene_action is None:
+            return np_action
+        return intervene_action
+
+    @staticmethod
+    def _strip_collect_internal_info(env_info) -> None:
+        if not isinstance(env_info, dict):
+            return
+        for key in (
+            "_collect_action",
+            "_collect_intervene_action",
+            "_collect_intervene_flag",
+        ):
+            env_info.pop(key, None)
+
+    def _action_like(self, candidate, reference, env_idx: int | None = None):
         candidate_np = self._to_numpy(candidate)
         reference_np = self._to_numpy(reference)
         if candidate_np is None or reference_np is None:
-            return False
-        return candidate_np.reshape(-1).shape == reference_np.reshape(-1).shape
+            return None
+        if tuple(candidate_np.shape) == tuple(reference_np.shape):
+            return candidate_np
+        if (
+            env_idx is not None
+            and candidate_np.ndim > 0
+            and candidate_np.shape[0] == self.num_envs
+            and tuple(candidate_np[env_idx].shape) == tuple(reference_np.shape)
+        ):
+            return candidate_np[env_idx]
+        if (
+            env_idx is None
+            and candidate_np.ndim > 0
+            and candidate_np.shape[0] == 1
+            and tuple(candidate_np[0].shape) == tuple(reference_np.shape)
+        ):
+            return candidate_np[0]
+        if candidate_np.reshape(-1).shape == reference_np.reshape(-1).shape:
+            return candidate_np.reshape(reference_np.shape)
+        return None
 
     def _get_episode_success(self, buf: dict, env_idx: int) -> bool:
         """Determine final episode success by scanning recorded info dicts.

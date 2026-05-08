@@ -90,6 +90,7 @@ SupportedModel.STARVLA = SupportedModel.register("starvla", force=True)
 SupportedModel.MLP_POLICY = SupportedModel.register("mlp_policy", force=True)
 SupportedModel.GR00T = SupportedModel.register("gr00t", force=True)
 SupportedModel.DEXBOTIC_PI = SupportedModel.register("dexbotic_pi", force=True)
+SupportedModel.DEXBOTIC_DM0 = SupportedModel.register("dexbotic_dm0", force=True)
 SupportedModel.DREAMZERO = SupportedModel.register("dreamzero", force=True)
 SupportedModel.CNN_POLICY = SupportedModel.register("cnn_policy", force=True)
 SupportedModel.FLOW_POLICY = SupportedModel.register("flow_policy", force=True)
@@ -112,6 +113,7 @@ EMBODIED_MODEL = set(
         SupportedModel.MLP_POLICY,
         SupportedModel.GR00T,
         SupportedModel.DEXBOTIC_PI,
+        SupportedModel.DEXBOTIC_DM0,
         SupportedModel.DREAMZERO,
         SupportedModel.CNN_POLICY,
         SupportedModel.FLOW_POLICY,
@@ -797,11 +799,43 @@ def validate_embodied_cfg(cfg):
         env_cfg = cfg.env.get(split, None)
         if env_cfg is None or not env_cfg.get("use_master_takeover", False):
             continue
+        if split == "train":
+            raise ValueError(
+                "env.train.use_master_takeover=True is not supported. "
+                "Master takeover no-step collection is only supported on env.eval."
+            )
+        env_type = str(env_cfg.get("env_type", "")).lower()
+        if env_type != "realworld":
+            raise ValueError(
+                f"env.{split}.use_master_takeover=True is only supported for "
+                f"env_type='realworld', got {env_type!r}."
+            )
+        total_num_envs = int(env_cfg.get("total_num_envs", 1))
+        if total_num_envs != 1:
+            raise ValueError(
+                f"env.{split}.use_master_takeover=True requires total_num_envs=1, "
+                f"got {total_num_envs}."
+            )
+        stage_num = int(cfg.rollout.get("pipeline_stage_num", 1))
+        if stage_num != 1:
+            raise ValueError(
+                f"env.{split}.use_master_takeover=True requires "
+                f"rollout.pipeline_stage_num=1, got {stage_num}."
+            )
         action_mode = env_cfg.get("action_mode", None)
         if action_mode != "absolute_pose":
             raise ValueError(
                 f"env.{split}.use_master_takeover=True requires "
                 "action_mode='absolute_pose'."
+            )
+        override_cfg = env_cfg.get("override_cfg", {}) or {}
+        pose_control_backend = str(
+            override_cfg.get("pose_control_backend", "smooth")
+        ).lower()
+        if pose_control_backend != "hybrid":
+            raise ValueError(
+                f"env.{split}.use_master_takeover=True requires "
+                "override_cfg.pose_control_backend='hybrid'."
             )
         master_takeover_cfg = env_cfg.get("master_takeover", {})
         control_mode = str(master_takeover_cfg.get("control_mode", "pose")).lower()
@@ -809,6 +843,12 @@ def validate_embodied_cfg(cfg):
             raise ValueError(
                 f"env.{split}.master_takeover.control_mode must be 'pose' for this "
                 f"takeover raw-collection path, got {control_mode!r}."
+            )
+        use_arm_ids = override_cfg.get("use_arm_ids", [0, 1])
+        if list(use_arm_ids) != [0, 1]:
+            raise ValueError(
+                f"env.{split}.use_master_takeover=True requires "
+                f"override_cfg.use_arm_ids=[0, 1], got {list(use_arm_ids)!r}."
             )
 
     # NOTE: Currently we only support actor_critic as PPO algorithm loss, and only support value_head as critic model.
@@ -893,6 +933,13 @@ def validate_embodied_cfg(cfg):
         weight_sync_interval = cfg.runner.get("weight_sync_interval", 1)
         assert weight_sync_interval > 0, "weight_sync_interval must be greater than 0"
         cfg.runner.weight_sync_interval = weight_sync_interval
+        # Overlap environment bootstrap (reset) with actor training to hide reset latency.
+        # This is enabled only when offload is disabled to avoid resource contention.
+        # Note: If EnvWorker and Actor share the same accelerator, this may increase GPU memory
+        # pressure during the overlap period.
+        cfg.runner.overlap_env_bootstrap = bool(
+            cfg.runner.get("overlap_env_bootstrap", False)
+        ) and not cfg.env.train.get("enable_offload", False)
         if (
             SupportedEnvType(cfg.env.train.env_type) == SupportedEnvType.MANISKILL
             or SupportedEnvType(cfg.env.eval.env_type) == SupportedEnvType.MANISKILL

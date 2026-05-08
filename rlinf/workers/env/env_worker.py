@@ -55,12 +55,15 @@ class EnvWorker(Worker):
 
         self.last_obs_list = []
         self.last_intervened_info_list = []
+        self._prefetched_train_bootstrap: list[EnvOutput] | None = None
         self.rollout_epoch = self.cfg.algorithm.get("rollout_epoch", 1)
         self._component_placement = HybridComponentPlacement(cfg, Cluster())
 
         self.collect_transitions = self.cfg.rollout.get("collect_transitions", False)
         self.collect_prev_infos = self.cfg.rollout.get("collect_prev_infos", True)
         self.stage_num = self.cfg.rollout.pipeline_stage_num
+        self.eval_last_obs_list = [None for _ in range(self.stage_num)]
+        self.eval_takeover_no_step = self._eval_takeover_no_step_enabled()
 
         self.reward_mode = self.cfg.get("reward", {}).get("reward_mode", "per_step")
         self.use_reward_model = self.cfg.get("reward", {}).get(
@@ -120,6 +123,17 @@ class EnvWorker(Worker):
                 torch.zeros(self.eval_num_envs_per_stage, dtype=torch.bool)
                 for _ in range(self.stage_num)
             ]
+
+    def _eval_takeover_no_step_enabled(self) -> bool:
+        env_cfg = self.cfg.env.get("eval", None)
+        if env_cfg is None:
+            return False
+        return (
+            str(env_cfg.get("env_type", "")).lower() == "realworld"
+            and bool(env_cfg.get("use_master_takeover", False))
+            and int(env_cfg.get("total_num_envs", 0)) == 1
+            and int(self.cfg.rollout.get("pipeline_stage_num", 1)) == 1
+        )
 
     def init_worker(self):
         self.dst_rank_map = self._setup_dst_rank_map()
@@ -476,6 +490,19 @@ class EnvWorker(Worker):
             extracted_obs = obs_list[-1] if obs_list else None
         if isinstance(infos_list, (list, tuple)):
             infos = infos_list[-1] if infos_list else None
+        if not obs_list:
+            if not self.eval_takeover_no_step:
+                raise RuntimeError(
+                    "Empty eval chunks are only supported for realworld "
+                    "use_master_takeover=True no-step collection."
+                )
+            extracted_obs = self.eval_last_obs_list[stage_id]
+            if extracted_obs is None:
+                raise RuntimeError("No-step eval chunk has no cached observation.")
+            env_info["_no_step_chunk"] = True
+            env_output = EnvOutput(obs=extracted_obs, final_obs=None)
+            return env_output, env_info
+        self.eval_last_obs_list[stage_id] = extracted_obs
         chunk_dones = torch.logical_or(chunk_terminations, chunk_truncations)
         final_obs = (
             self._build_chunk_final_obs(obs_list, infos_list)
@@ -488,9 +515,9 @@ class EnvWorker(Worker):
         )
 
         current_dones = chunk_dones[:, -1]  # [num_envs] bool
-        prev = self.eval_prev_done[stage_id]
-        newly_done = current_dones & ~prev.to(current_dones.device)
-        self.eval_prev_done[stage_id] = current_dones.clone()
+        prev = self.eval_prev_done[stage_id].to(current_dones.device)
+        newly_done = current_dones & ~prev
+        self.eval_prev_done[stage_id] = prev | current_dones
 
         if newly_done.any():
             if "final_info" in infos:
@@ -879,6 +906,36 @@ class EnvWorker(Worker):
 
         return env_outputs
 
+    def _send_train_bootstrap(
+        self, rollout_channel: Channel, env_outputs: list[EnvOutput]
+    ) -> None:
+        for stage_id in range(self.stage_num):
+            env_output: EnvOutput = env_outputs[stage_id]
+            env_batch = env_output.to_dict()
+            self.send_env_batch(
+                rollout_channel,
+                {
+                    "obs": env_batch["obs"],
+                    "final_obs": env_batch["final_obs"],
+                },
+            )
+
+    def _bootstrap_and_send_train(self, rollout_channel: Channel) -> list[EnvOutput]:
+        env_outputs = self.bootstrap_step()
+        self._send_train_bootstrap(rollout_channel, env_outputs)
+        return env_outputs
+
+    def prefetch_train_bootstrap(self, rollout_channel: Channel) -> None:
+        """Prepare and send the first env batch for the next training rollout."""
+        if self._prefetched_train_bootstrap is not None:
+            raise RuntimeError(
+                "A prefetched train bootstrap already exists. "
+                "Call interact() to consume it before prefetching again."
+            )
+        self._prefetched_train_bootstrap = self._bootstrap_and_send_train(
+            rollout_channel
+        )
+
     def record_env_metrics(
         self, env_metrics: dict[str, list], env_info: dict[str, Any], epoch: int
     ):
@@ -904,7 +961,7 @@ class EnvWorker(Worker):
     async def send_rollout_trajectories(
         self, rollout_result: EmbodiedRolloutResult, channel: Channel
     ):
-        trajectories: Trajectory = rollout_result.to_splited_trajectories(
+        trajectories: list[Trajectory] = rollout_result.to_splited_trajectories(
             self.actor_split_num
         )
         for trajectory in trajectories:
@@ -929,17 +986,11 @@ class EnvWorker(Worker):
         env_metrics = defaultdict(list)
 
         for epoch in range(self.rollout_epoch):
-            env_outputs = self.bootstrap_step()
-            for stage_id in range(self.stage_num):
-                env_output: EnvOutput = env_outputs[stage_id]
-                env_batch = env_output.to_dict()
-                self.send_env_batch(
-                    rollout_channel,
-                    {
-                        "obs": env_batch["obs"],
-                        "final_obs": env_batch["final_obs"],
-                    },
-                )
+            if epoch == 0 and self._prefetched_train_bootstrap is not None:
+                env_outputs = self._prefetched_train_bootstrap
+                self._prefetched_train_bootstrap = None
+            else:
+                env_outputs = self._bootstrap_and_send_train(rollout_channel)
 
             for chunk_step_idx in range(self.n_train_chunk_steps):
                 for stage_id in range(self.stage_num):
@@ -1104,6 +1155,7 @@ class EnvWorker(Worker):
                         self.eval_num_envs_per_stage, dtype=torch.bool
                     )
                     extracted_obs, infos = self.eval_env_list[stage_id].reset()
+                    self.eval_last_obs_list[stage_id] = extracted_obs
                     env_output = EnvOutput(
                         obs=extracted_obs,
                         final_obs=(
@@ -1122,7 +1174,9 @@ class EnvWorker(Worker):
                         mode="eval",
                     )
 
-            for eval_step in range(self.n_eval_chunk_steps):
+            eval_step = 0
+            while eval_step < self.n_eval_chunk_steps:
+                advanced_eval_step = False
                 for stage_id in range(self.stage_num):
                     raw_chunk_actions = self.recv_chunk_actions(
                         input_channel, mode="eval"
@@ -1130,20 +1184,29 @@ class EnvWorker(Worker):
                     env_output, env_info = self.env_evaluate_step(
                         raw_chunk_actions, stage_id
                     )
+                    no_step_chunk = bool(env_info.pop("_no_step_chunk", False))
+                    if no_step_chunk and not self.eval_takeover_no_step:
+                        raise RuntimeError(
+                            "No-step eval chunks are only supported for realworld "
+                            "use_master_takeover=True collection."
+                        )
+                    if not no_step_chunk:
+                        advanced_eval_step = True
 
                     for key, value in env_info.items():
                         eval_metrics[key].append(value)
 
-                    if self.cfg.env.eval.auto_reset:
-                        if (
-                            eval_rollout_epoch
-                            == self.cfg.algorithm.eval_rollout_epoch - 1
-                            and eval_step == self.n_eval_chunk_steps - 1
-                        ):
-                            continue
-                    else:
-                        if eval_step == self.n_eval_chunk_steps - 1:
-                            continue
+                    if not no_step_chunk:
+                        if self.cfg.env.eval.auto_reset:
+                            if (
+                                eval_rollout_epoch
+                                == self.cfg.algorithm.eval_rollout_epoch - 1
+                                and eval_step == self.n_eval_chunk_steps - 1
+                            ):
+                                continue
+                        else:
+                            if eval_step == self.n_eval_chunk_steps - 1:
+                                continue
                     env_batch = env_output.to_dict()
                     self.send_env_batch(
                         rollout_channel,
@@ -1153,6 +1216,8 @@ class EnvWorker(Worker):
                         },
                         mode="eval",
                     )
+                if advanced_eval_step:
+                    eval_step += 1
 
             self.finish_rollout(mode="eval")
         for stage_id in range(self.stage_num):

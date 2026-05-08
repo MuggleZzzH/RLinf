@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import threading
 import time
 import tracemalloc
 
@@ -40,11 +41,9 @@ class Turtle2SmoothController(Worker):
         env_idx: int = 0,
         node_rank: int = 0,
         worker_rank: int = 0,
-        debug_pose_control: bool = False,
-        debug_gripper_control: bool = False,
         gripper_target_tolerance: float = 0.05,
         pose_control_backend: str = "smooth",
-        direct_publish_hz: float = 100.0,
+        takeover_publish_hz: float = 100.0,
         follower_pose_cmd_left_topic: str = "/follow_pos_cmd_1",
         follower_pose_cmd_right_topic: str = "/follow_pos_cmd_2",
     ):
@@ -62,11 +61,9 @@ class Turtle2SmoothController(Worker):
         placement = NodePlacementStrategy(node_ranks=[node_rank])
         return Turtle2SmoothController.create_group(
             freq,
-            debug_pose_control,
-            debug_gripper_control,
             gripper_target_tolerance,
             pose_control_backend,
-            direct_publish_hz,
+            takeover_publish_hz,
             follower_pose_cmd_left_topic,
             follower_pose_cmd_right_topic,
         ).launch(
@@ -78,11 +75,9 @@ class Turtle2SmoothController(Worker):
     def __init__(
         self,
         freq=50,
-        debug_pose_control: bool = False,
-        debug_gripper_control: bool = False,
         gripper_target_tolerance: float = 0.05,
         pose_control_backend: str = "smooth",
-        direct_publish_hz: float = 100.0,
+        takeover_publish_hz: float = 100.0,
         follower_pose_cmd_left_topic: str = "/follow_pos_cmd_1",
         follower_pose_cmd_right_topic: str = "/follow_pos_cmd_2",
     ):
@@ -98,14 +93,14 @@ class Turtle2SmoothController(Worker):
 
         self._state = Turtle2RobotState()
         self.pose_control_backend = str(pose_control_backend).lower()
-        if self.pose_control_backend not in {"smooth", "direct"}:
+        if self.pose_control_backend not in {"smooth", "hybrid"}:
             raise ValueError(
-                "pose_control_backend must be one of {'smooth', 'direct'}, "
+                "pose_control_backend must be one of {'smooth', 'hybrid'}, "
                 f"got {self.pose_control_backend!r}."
             )
-        self.direct_publish_hz = float(direct_publish_hz)
-        if self.direct_publish_hz <= 0:
-            raise ValueError("direct_publish_hz must be positive.")
+        self.takeover_publish_hz = float(takeover_publish_hz)
+        if self.takeover_publish_hz <= 0:
+            raise ValueError("takeover_publish_hz must be positive.")
         self._follower_pose_cmd_left_topic = follower_pose_cmd_left_topic
         self._follower_pose_cmd_right_topic = follower_pose_cmd_right_topic
         self._direct_pose_msg_cls = None
@@ -113,6 +108,8 @@ class Turtle2SmoothController(Worker):
         self._direct_pose_right_pub = None
         self._direct_pose_left_target = None
         self._direct_pose_right_target = None
+        self._takeover_gate = threading.Event()
+        self._direct_target_lock = threading.RLock()
 
         control_period = rospy.Duration(1 / freq)
         state_period = rospy.Duration(1 / 200.0)
@@ -128,18 +125,14 @@ class Turtle2SmoothController(Worker):
         # xyz, rpy, gripper
         self.tol = [0.002, 0.005, 5]  # m, rad, cm
         self.gripper_target_tolerance = float(gripper_target_tolerance)
-        self.debug_pose_control = bool(debug_pose_control)
-        self.debug_gripper_control = bool(debug_gripper_control)
         self.xyz_speed = 0.5  # m/s
         self.rpy_speed = 1.5  # rad/s
         self.freq = freq
 
         # FIXME: should move to roscontroller
-        if self.pose_control_backend == "smooth":
-            rospy.Timer(control_period, self.smooth_action_callback)
-        else:
-            direct_period = rospy.Duration(1 / self.direct_publish_hz)
-            rospy.Timer(direct_period, self.direct_pose_callback)
+        rospy.Timer(control_period, self.smooth_action_callback)
+        direct_period = rospy.Duration(1 / self.takeover_publish_hz)
+        rospy.Timer(direct_period, self.direct_pose_callback)
         rospy.Timer(state_period, self.state_callback)
 
         tracemalloc.start(15)
@@ -169,7 +162,7 @@ class Turtle2SmoothController(Worker):
         return self._state
 
     def smooth_action_callback(self, event):
-        if getattr(self, "pose_control_backend", "smooth") != "smooth":
+        if self._takeover_gate.is_set():
             return
         # print("intimer")
         xyz_step = self.xyz_speed / self.freq  # m
@@ -197,18 +190,48 @@ class Turtle2SmoothController(Worker):
         # print(targetrpy1, targetrpy2)
         errrpy1 = np.linalg.norm(currpy1 - targetrpy1)
         errrpy2 = np.linalg.norm(currpy2 - targetrpy2)
+        targetgripper1 = float(self.left_arm_target[6])
+        targetgripper2 = float(self.right_arm_target[6])
+        errgripper1 = abs(float(self._state.follow1_pos[6]) - targetgripper1)
+        errgripper2 = abs(float(self._state.follow2_pos[6]) - targetgripper2)
 
-        if (
+        pose_reached = (
             errxyz1 < self.tol[0]
             and errxyz2 < self.tol[0]
             and errrpy1 < self.tol[1]
             and errrpy2 < self.tol[1]
-        ):
+        )
+        gripper_reached = (
+            errgripper1 < self.gripper_target_tolerance
+            and errgripper2 < self.gripper_target_tolerance
+        )
+        if pose_reached:
             # print(f"[INFO] target reach! {errxyz1:.4f}, {errxyz2:.4f}, {errrpy1:.4f}, {errrpy2:.4f}")
             self.last_expected_xyz1 = curxyz1.copy()
             self.last_expected_xyz2 = curxyz2.copy()
             self.last_expected_rpy1 = currpy1.copy()
             self.last_expected_rpy2 = currpy2.copy()
+            if not gripper_reached:
+                self.controller.arms_control(
+                    [
+                        curxyz1[0],
+                        curxyz1[1],
+                        curxyz1[2],
+                        currpy1[0],
+                        currpy1[1],
+                        currpy1[2],
+                        targetgripper1,
+                    ],
+                    [
+                        curxyz2[0],
+                        curxyz2[1],
+                        curxyz2[2],
+                        currpy2[0],
+                        currpy2[1],
+                        currpy2[2],
+                        targetgripper2,
+                    ],
+                )
             return
         else:
             # interpolate xyz
@@ -281,32 +304,55 @@ class Turtle2SmoothController(Worker):
             # time.sleep(0.2 / self.freq)
 
     def move_arm(self, left_arm_target, right_arm_target):
+        self._validate_pose_target(left_arm_target, right_arm_target)
+        self.left_arm_target = left_arm_target
+        self.right_arm_target = right_arm_target
+
+    def _validate_pose_target(self, left_arm_target, right_arm_target) -> None:
         assert isinstance(left_arm_target, list) and len(left_arm_target) == 7, (
             "left_arm_target should be a list of length 7"
         )
         assert isinstance(right_arm_target, list) and len(right_arm_target) == 7, (
             "right_arm_target should be a list of length 7"
         )
-        self.left_arm_target = left_arm_target
-        self.right_arm_target = right_arm_target
-        if getattr(self, "pose_control_backend", "smooth") == "direct":
+        assert np.all(np.isfinite(left_arm_target)), "left_arm_target must be finite."
+        assert np.all(np.isfinite(right_arm_target)), "right_arm_target must be finite."
+
+    def set_takeover_gate(self, enabled: bool) -> None:
+        if enabled:
+            self._takeover_gate.set()
+        else:
+            self._takeover_gate.clear()
+
+    def is_takeover_gate_active(self) -> bool:
+        return self._takeover_gate.is_set()
+
+    def clear_takeover_target(self) -> None:
+        with self._direct_target_lock:
+            self._direct_pose_left_target = None
+            self._direct_pose_right_target = None
+
+    def publish_takeover_pose(self, left_arm_target, right_arm_target) -> None:
+        self._validate_pose_target(left_arm_target, right_arm_target)
+        with self._direct_target_lock:
             self._direct_pose_left_target = list(left_arm_target)
             self._direct_pose_right_target = list(right_arm_target)
-            self._publish_direct_pose(left_arm_target, right_arm_target)
-            return
+            left_target = list(self._direct_pose_left_target)
+            right_target = list(self._direct_pose_right_target)
+        self._publish_direct_pose(left_target, right_target)
 
     def direct_pose_callback(self, event):
-        if getattr(self, "pose_control_backend", "smooth") != "direct":
+        if not self._takeover_gate.is_set():
             return
-        if (
-            self._direct_pose_left_target is None
-            or self._direct_pose_right_target is None
-        ):
-            return
-        self._publish_direct_pose(
-            self._direct_pose_left_target,
-            self._direct_pose_right_target,
-        )
+        with self._direct_target_lock:
+            if (
+                self._direct_pose_left_target is None
+                or self._direct_pose_right_target is None
+            ):
+                return
+            left_target = list(self._direct_pose_left_target)
+            right_target = list(self._direct_pose_right_target)
+        self._publish_direct_pose(left_target, right_target)
 
     def _ensure_direct_pose_publishers(self):
         if (
@@ -352,22 +398,28 @@ class Turtle2SmoothController(Worker):
         self._direct_pose_left_pub.publish(self._make_pos_cmd_msg(left_pose))
         self._direct_pose_right_pub.publish(self._make_pos_cmd_msg(right_pose))
 
-    def hold_current_pose(self):
-        state = self._update_state_from_controller()
+    def _sync_smooth_targets_from_state(self, state):
         left_pose = state.follow1_pos.astype(np.float32, copy=True)
         right_pose = state.follow2_pos.astype(np.float32, copy=True)
-
         self.left_arm_target = left_pose.tolist()
         self.right_arm_target = right_pose.tolist()
         self.last_expected_xyz1 = left_pose[:3].copy()
         self.last_expected_xyz2 = right_pose[:3].copy()
         self.last_expected_rpy1 = left_pose[3:6].copy()
         self.last_expected_rpy2 = right_pose[3:6].copy()
+        return left_pose, right_pose
 
-        if getattr(self, "pose_control_backend", "smooth") == "direct":
-            self._direct_pose_left_target = self.left_arm_target
-            self._direct_pose_right_target = self.right_arm_target
-            self._publish_direct_pose(self.left_arm_target, self.right_arm_target)
+    def sync_smooth_target_to_current_pose(self):
+        state = self._update_state_from_controller()
+        self._sync_smooth_targets_from_state(state)
+        return state
+
+    def hold_current_pose(self):
+        state = self._update_state_from_controller()
+        left_pose, right_pose = self._sync_smooth_targets_from_state(state)
+
+        if self._takeover_gate.is_set():
+            self.publish_takeover_pose(left_pose.tolist(), right_pose.tolist())
         else:
             self.controller.arms_control(self.left_arm_target, self.right_arm_target)
         return state
