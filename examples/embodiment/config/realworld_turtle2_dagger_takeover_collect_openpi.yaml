@@ -86,7 +86,7 @@ env:
   enable_offload: False
   train:
     override_cfg:
-      task_description: "Collect Turtle2 takeover data."
+      task_description: "fold the towel"
   eval:
     total_num_envs: 1
     auto_reset: False
@@ -96,7 +96,7 @@ env:
     use_gello: False
     use_master_takeover: True
     action_mode: absolute_pose
-    keyboard_reward_wrapper: single_stage
+    keyboard_reward_wrapper: null
     main_image_key: wrist_2
     max_steps_per_rollout_epoch: 3000
     max_episode_steps: 3000
@@ -110,7 +110,7 @@ env:
       finalize_interval: 1
     master_takeover:
       host: "0.0.0.0"
-      port: 8765
+      port: 8766
       running_mode_source: "ros_param"
       running_mode_param: "/running_mode"
       normal_mode_value: 1
@@ -129,7 +129,7 @@ env:
       takeover_key: "2"
       debounce_s: 0.3
     override_cfg:
-      task_description: "Collect Turtle2 takeover data."
+      task_description: "fold the towel"
       use_arm_ids: [0, 1]
       use_camera_ids: [0, 1, 2]
       enforce_gripper_close: false

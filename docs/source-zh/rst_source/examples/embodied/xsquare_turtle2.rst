@@ -364,7 +364,7 @@ Turtle2 原有的 relative-pose 动作语义：
            - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
            - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
 
-``apply_dual_pose_action_wrappers`` 会挂载部署动作 wrapper：
+``apply_dual_arm_wrappers`` 会挂载部署动作 wrapper：
 
 - ``absolute_pose`` 使用 ``DualAbsolutePoseActionWrapper``。策略为每条激活机械臂
   输出一个 7 维绝对位姿动作：``[x, y, z, roll, pitch, yaw, gripper]``。

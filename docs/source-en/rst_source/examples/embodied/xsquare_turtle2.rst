@@ -378,7 +378,7 @@ relative-pose action semantics:
            - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
            - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
 
-``apply_dual_pose_action_wrappers`` attaches the deploy action wrapper stack:
+``apply_dual_arm_wrappers`` attaches the deploy action wrapper stack:
 
 - ``absolute_pose`` uses ``DualAbsolutePoseActionWrapper``. The policy emits
   one 7D absolute pose command per active arm:
