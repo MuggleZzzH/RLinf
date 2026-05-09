@@ -289,9 +289,10 @@ class Turtle2Env(gym.Env):
             high=np.concatenate(action_high).astype(np.float32),
             dtype=np.float32,
         )
-        # Keep the base env's public step/action_space on relative-pose semantics
-        # until the deploy subclass is removed.
-        self.action_space = self._relative_pose_action_space
+        if self.config.action_mode == "absolute_pose":
+            self.action_space = self._absolute_pose_action_space
+        else:
+            self.action_space = self._relative_pose_action_space
 
         obs_dim_per_arm = 8  # xyz(3) + quat(4) + gripper(1)
         self.observation_space = gym.spaces.Dict(
@@ -674,7 +675,7 @@ class Turtle2Env(gym.Env):
             self._turtle2_state = self._turtle2_state
         observation = self._get_observation()
         reward = self._calc_step_reward(observation)
-        terminated = reward == 1
+        terminated = bool(reward == 1) if self.config.enable_task_reward else False
         truncated = self._num_steps >= self.config.max_num_steps
         return observation, reward, terminated, truncated, {}
 
@@ -720,7 +721,7 @@ class Turtle2Env(gym.Env):
                 self._turtle2_state = self._controller.get_state().wait()[0]
             observation = self._get_observation()
             reward = self._calc_step_reward(observation)
-            terminated = False
+            terminated = bool(reward == 1) if self.config.enable_task_reward else False
             truncated = self._num_steps >= self.config.max_num_steps
             return observation, reward, terminated, truncated, {}
 
@@ -764,12 +765,23 @@ class Turtle2Env(gym.Env):
             self._turtle2_state = self._controller.get_state().wait()[0]
         observation = self._get_observation()
         reward = self._calc_step_reward(observation)
-        terminated = False
+        terminated = bool(reward == 1) if self.config.enable_task_reward else False
         truncated = self._num_steps >= self.config.max_num_steps
         return observation, reward, terminated, truncated, {}
 
     def step(self, action: np.ndarray) -> tuple[dict, float, bool, bool, dict]:
-        return self.step_relative_pose(action)
+        if self.config.action_mode == "relative_pose":
+            return self.step_relative_pose(action)
+        if self.config.action_mode == "absolute_pose":
+            return self.step_absolute_pose(action)
+        raise ValueError(
+            f"Unsupported action_mode={self.config.action_mode!r}. "
+            "Expected one of {'relative_pose', 'absolute_pose'}."
+        )
+
+    @property
+    def task_description(self):
+        return self.config.task_description
 
     @property
     def num_steps(self):
@@ -789,6 +801,8 @@ class Turtle2Env(gym.Env):
             ``1.0`` on success, a dense exponential reward when
             ``use_dense_reward`` is set, or ``0.0`` otherwise.
         """
+        if not self.config.enable_task_reward:
+            return 0.0
         if not self.config.is_dummy:
             # Convert orientation to euler angles
             position1 = self._turtle2_state.follow1_pos[0:6]
