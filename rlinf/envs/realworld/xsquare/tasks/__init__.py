@@ -20,7 +20,7 @@ import gymnasium as gym
 from gymnasium.envs.registration import register
 
 from rlinf.envs.realworld.common.wrappers import (
-    apply_dual_pose_action_wrappers,
+    apply_dual_arm_wrappers,
     apply_single_arm_wrappers,
 )
 from rlinf.envs.realworld.xsquare.tasks.button_env import (
@@ -106,7 +106,7 @@ def create_turtle2_deploy_env(
         hardware_info=hardware_info,
         env_idx=env_idx,
     )
-    return apply_dual_pose_action_wrappers(env, wrapper_cfg)
+    return apply_dual_arm_wrappers(env, wrapper_cfg)
 
 
 register(

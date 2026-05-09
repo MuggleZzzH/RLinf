@@ -14,7 +14,6 @@
 
 from .apply import (
     apply_dual_arm_wrappers,
-    apply_dual_pose_action_wrappers,
     apply_single_arm_wrappers,
 )
 from .dual_euler_obs import DualQuat2EulerWrapper
@@ -57,6 +56,5 @@ __all__ = [
     "RelativeFrame",
     "SpacemouseIntervention",
     "apply_dual_arm_wrappers",
-    "apply_dual_pose_action_wrappers",
     "apply_single_arm_wrappers",
 ]
