@@ -80,6 +80,7 @@ env:
   eval:
     max_steps_per_rollout_epoch: 600
     max_episode_steps: 600
+    debug_first_frame_dir: ${runner.logger.log_path}/debug/fold_towel_first_observation
     video_cfg:
       save_video: True
       info_on_video: True
@@ -126,7 +127,7 @@ actor:
     action_dim: 14
     add_value_head: False
     openpi:
-      config_name: "pi0_realworld"
+      config_name: "pi0_s2m"
       num_images_in_input: 3
       train_expert_only: False
       detach_critic_input: True
@@ -134,9 +135,10 @@ actor:
       action_env_dim: ${actor.model.action_dim}
       action_horizon: 30
       action_dim: 32
+      override_data_assets: True
+      load_norm_stats_from_checkpoint: True
     openpi_data:
       repo_id: "fold_towel_gqy_0317,fold_towel_gqy_0318"
-      default_prompt: "Fold the towel on the table using both arms."
 
 reward:
   use_reward_model: False

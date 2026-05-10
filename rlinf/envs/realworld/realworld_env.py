@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import json
 import os
 import pathlib
 import time
@@ -57,6 +58,8 @@ class RealWorldEnv(gym.Env):
         self.manual_episode_control_only = bool(
             self.override_cfg.get("manual_episode_control_only", False)
         )
+        self.debug_first_frame_dir = cfg.get("debug_first_frame_dir", None)
+        self._debug_first_frame_written = False
 
         self._init_env()
 
@@ -224,6 +227,7 @@ class RealWorldEnv(gym.Env):
             raise KeyError(
                 f"main_image_key {self.main_image_key!r} not in {list(frames)}"
             )
+        self._maybe_dump_first_observation(frames, full_states)
         obs["main_images"] = frames[self.main_image_key]
         raw_images = OrderedDict(sorted(frames.items()))
         raw_images.pop(self.main_image_key)
@@ -234,6 +238,94 @@ class RealWorldEnv(gym.Env):
         obs = to_tensor(obs)
         obs["task_descriptions"] = self.task_descriptions
         return obs
+
+    def _debug_worker_info(self):
+        if self.worker_info is None:
+            return {}
+        keys = (
+            "rank",
+            "group_world_size",
+            "cluster_node_rank",
+            "node_ip",
+            "node_port",
+            "accelerator_type",
+            "accelerator_model",
+            "accelerator_rank",
+        )
+        return {key: str(getattr(self.worker_info, key, "")) for key in keys}
+
+    @staticmethod
+    def _debug_image_to_uint8(image):
+        image = np.asarray(image)
+        if image.ndim == 4:
+            image = image[0]
+        if image.ndim == 3 and image.shape[0] in (1, 3) and image.shape[-1] != 3:
+            image = np.moveaxis(image, 0, -1)
+        if np.issubdtype(image.dtype, np.floating):
+            max_val = float(np.nanmax(image)) if image.size else 1.0
+            if max_val <= 1.0:
+                image = image * 255.0
+        image = np.nan_to_num(image, nan=0.0, posinf=255.0, neginf=0.0)
+        return np.clip(image, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def _debug_contact_sheet(images):
+        if not images:
+            return None
+        height = min(img.shape[0] for img in images)
+        resized = []
+        for img in images:
+            if img.shape[0] != height:
+                img = img[:height]
+            resized.append(img)
+        return np.concatenate(resized, axis=1)
+
+    def _maybe_dump_first_observation(self, frames, states):
+        if self._debug_first_frame_written or not self.debug_first_frame_dir:
+            return
+        self._debug_first_frame_written = True
+
+        try:
+            import imageio.v2 as imageio
+
+            output_dir = pathlib.Path(
+                os.path.expandvars(os.path.expanduser(str(self.debug_first_frame_dir)))
+            )
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            frame_keys = list(frames.keys())
+            extra_view_keys = [
+                key for key in sorted(frame_keys) if key != self.main_image_key
+            ]
+            metadata = {
+                "task_descriptions": list(self.task_descriptions),
+                "main_image_key": self.main_image_key,
+                "frame_keys": frame_keys,
+                "extra_view_keys": extra_view_keys,
+                "state_shape": list(np.asarray(states).shape),
+                "seed": int(self.seed),
+                "worker_info": self._debug_worker_info(),
+            }
+            with open(output_dir / "metadata.json", "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+            images = []
+            for idx, key in enumerate(frame_keys):
+                image = self._debug_image_to_uint8(frames[key])
+                role = "main" if key == self.main_image_key else f"extra_{idx}"
+                imageio.imwrite(output_dir / f"{idx:02d}_{key}_{role}.png", image)
+                images.append(image)
+
+            contact_sheet = self._debug_contact_sheet(images)
+            if contact_sheet is not None:
+                imageio.imwrite(output_dir / "camera_contact_sheet.png", contact_sheet)
+
+            print(
+                "[RealWorldEnv] dumped first observation debug snapshot to "
+                f"{output_dir}; metadata={metadata}"
+            )
+        except Exception as exc:
+            print(f"[RealWorldEnv] failed to dump first observation snapshot: {exc}")
 
     def step(self, actions=None, auto_reset=True):
         if isinstance(actions, torch.Tensor):
