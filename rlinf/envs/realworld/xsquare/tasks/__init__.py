@@ -20,7 +20,12 @@ import gymnasium as gym
 from gymnasium.envs.registration import register
 
 from rlinf.envs.realworld.common.wrappers import (
-    apply_dual_arm_wrappers,
+    DualQuat2EulerWrapper,
+    DualRelativeFrame,
+    KeyboardRewardDoneMultiStageWrapper,
+    KeyboardRewardDoneWrapper,
+    KeyboardRunningModeWrapper,
+    MasterTakeoverIntervention,
     apply_single_arm_wrappers,
 )
 from rlinf.envs.realworld.xsquare.tasks.button_env import (
@@ -67,6 +72,17 @@ def _resolve_deploy_action_mode(
     return action_mode, wrapper_cfg
 
 
+def _apply_keyboard_reward(env: gym.Env, mode: str | None) -> gym.Env:
+    config = env.get_wrapper_attr("config")
+    if config.is_dummy or not mode:
+        return env
+    if mode == "multi_stage":
+        return KeyboardRewardDoneMultiStageWrapper(env)
+    if mode == "single_stage":
+        return KeyboardRewardDoneWrapper(env)
+    return env
+
+
 def create_button_env(
     override_cfg: dict[str, Any],
     worker_info: Any,
@@ -93,6 +109,23 @@ def create_turtle2_deploy_env(
     override_cfg = dict(override_cfg)
     action_mode, wrapper_cfg = _resolve_deploy_action_mode(override_cfg, env_cfg)
     wrapper_cfg.setdefault("no_gripper", False)
+    if wrapper_cfg.get("use_spacemouse", False) or wrapper_cfg.get("use_gello", False):
+        raise ValueError(
+            "Turtle2 deploy does not support teleop wrappers. "
+            "Set use_spacemouse=False and use_gello=False."
+        )
+    use_master_takeover = bool(wrapper_cfg.get("use_master_takeover", False))
+    if use_master_takeover and action_mode != "absolute_pose":
+        raise ValueError(
+            "use_master_takeover=True requires action_mode='absolute_pose'."
+        )
+    if use_master_takeover and str(
+        override_cfg.get("pose_control_backend", "smooth")
+    ).lower() != "hybrid":
+        raise ValueError(
+            "use_master_takeover=True requires "
+            "override_cfg.pose_control_backend='hybrid'."
+        )
     override_cfg.setdefault("use_arm_ids", [0, 1])
     override_cfg.setdefault("use_camera_ids", [0, 1, 2])
     override_cfg.setdefault("enforce_gripper_close", False)
@@ -106,7 +139,18 @@ def create_turtle2_deploy_env(
         hardware_info=hardware_info,
         env_idx=env_idx,
     )
-    return apply_dual_arm_wrappers(env, wrapper_cfg)
+    if action_mode == "relative_pose" and wrapper_cfg.get("use_relative_frame", True):
+        env = DualRelativeFrame(env)
+    if use_master_takeover:
+        env = MasterTakeoverIntervention(
+            env, config=wrapper_cfg.get("master_takeover", None)
+        )
+        keyboard_running_mode_cfg = wrapper_cfg.get("keyboard_running_mode", None)
+        if keyboard_running_mode_cfg is not None:
+            env = KeyboardRunningModeWrapper(env, config=keyboard_running_mode_cfg)
+    env = _apply_keyboard_reward(env, wrapper_cfg.get("keyboard_reward_wrapper", None))
+    env = DualQuat2EulerWrapper(env)
+    return env
 
 
 register(

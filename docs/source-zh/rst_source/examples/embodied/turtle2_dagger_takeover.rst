@@ -18,13 +18,13 @@ LeRobot 数据集中再清洗出需要的 expert segments。
 
    OpenPI policy
       -> 14D absolute pose + gripper action
-      -> DualAbsolutePoseActionWrapper
+      -> Turtle2Env.step_absolute_pose
       -> MasterTakeoverIntervention
       -> Turtle2 hybrid pose control
       -> /follow_pos_cmd_1, /follow_pos_cmd_2
       -> CollectEpisode LeRobot export
 
-``MasterTakeoverIntervention`` 只负责选择当前执行哪一种 action：
+``MasterTakeoverIntervention`` 只负责在 Turtle2 本地 stack 里选择当前执行哪一种 action：
 
 - normal mode 下直接放行 policy action；
 - takeover mode 下，如果收到 fresh master pose，则用 master pose 覆盖 policy action；

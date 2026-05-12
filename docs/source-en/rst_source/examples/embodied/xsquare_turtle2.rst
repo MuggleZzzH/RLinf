@@ -356,7 +356,7 @@ Use it as the ``env.eval`` entry in an eval-only config, for example by copying
      - override hydra/job_logging: stdout
 
 The Turtle2 deploy fragment sets ``init_params.id`` to ``Turtle2DeployEnv-v1``
-and exposes ``action_mode`` at the env level. The default keeps Turtle2's
+and resolves ``action_mode`` inside ``Turtle2Env``. The default keeps Turtle2's
 relative-pose action semantics:
 
 .. code-block:: yaml
@@ -378,19 +378,21 @@ relative-pose action semantics:
            - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
            - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
 
-``apply_dual_arm_wrappers`` attaches the deploy action wrapper stack:
+``create_turtle2_deploy_env`` builds the Turtle2 wrapper stack locally:
 
-- ``absolute_pose`` uses ``DualAbsolutePoseActionWrapper``. The policy emits
-  one 7D absolute pose command per active arm:
+- ``absolute_pose`` goes directly to ``Turtle2Env.step_absolute_pose``. The
+  policy emits one 7D absolute pose command per active arm:
   ``[x, y, z, roll, pitch, yaw, gripper]``.
-- ``relative_pose`` is the default and uses ``DualRelativePoseActionWrapper``.
-  By default it also
-  applies ``DualRelativeFrame`` so end-effector-frame delta actions are
-  transformed back to the base frame before reaching the robot env.
-- Set ``action_mode: absolute_pose`` only when the policy emits absolute pose
-  commands.
+- ``relative_pose`` is the default. When ``use_relative_frame`` is enabled,
+  the local stack applies ``DualRelativeFrame`` so end-effector-frame delta
+  actions are transformed back to the base frame before reaching the robot env.
+- ``use_master_takeover=True`` adds ``MasterTakeoverIntervention`` and, when
+  configured, ``KeyboardRunningModeWrapper`` on top of the Turtle2 stack.
 - Both modes finish with ``DualQuat2EulerWrapper`` so the policy observes
   Euler-format TCP state.
+
+``apply_dual_arm_wrappers`` remains the generic dual-arm wrapper builder for
+other realworld tasks.
 
 Run the eval-only deployment config from the Ray head node:
 

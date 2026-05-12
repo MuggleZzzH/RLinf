@@ -26,10 +26,6 @@ from rlinf.envs.realworld.common.wrappers.dual_euler_obs import (
 from rlinf.envs.realworld.common.wrappers.dual_gello_intervention import (
     DualGelloIntervention,
 )
-from rlinf.envs.realworld.common.wrappers.dual_pose_action import (
-    DualAbsolutePoseActionWrapper,
-    DualRelativePoseActionWrapper,
-)
 from rlinf.envs.realworld.common.wrappers.dual_relative_frame import (
     DualRelativeFrame,
 )
@@ -41,12 +37,6 @@ from rlinf.envs.realworld.common.wrappers.gello_intervention import (
     GelloIntervention,
 )
 from rlinf.envs.realworld.common.wrappers.gripper_close import GripperCloseEnv
-from rlinf.envs.realworld.common.wrappers.keyboard_running_mode_wrapper import (
-    KeyboardRunningModeWrapper,
-)
-from rlinf.envs.realworld.common.wrappers.master_takeover_intervention import (
-    MasterTakeoverIntervention,
-)
 from rlinf.envs.realworld.common.wrappers.relative_frame import RelativeFrame
 from rlinf.envs.realworld.common.wrappers.reward_done_wrapper import (
     KeyboardRewardDoneMultiStageWrapper,
@@ -74,17 +64,6 @@ def _apply_keyboard_reward(env: gym.Env, mode: Optional[str]) -> gym.Env:
     if mode == "single_stage":
         return KeyboardRewardDoneWrapper(env)
     return env
-
-
-def _apply_keyboard_running_mode(
-    env: gym.Env, config: Mapping[str, Any] | None
-) -> gym.Env:
-    if config is None or not config.get("enabled", False):
-        return env
-    env_config = env.get_wrapper_attr("config")
-    if env_config.is_dummy:
-        return env
-    return KeyboardRunningModeWrapper(env, config=config)
 
 
 def apply_single_arm_wrappers(env: gym.Env, cfg: Mapping[str, Any]) -> gym.Env:
@@ -121,68 +100,11 @@ def apply_single_arm_wrappers(env: gym.Env, cfg: Mapping[str, Any]) -> gym.Env:
 
 def apply_dual_arm_wrappers(env: gym.Env, cfg: Mapping[str, Any]) -> gym.Env:
     """Wrapper stack for dual-arm realworld envs.
-
-    ``action_mode`` defaults to ``delta_axis_angle`` to preserve the existing
-    dual-arm teleop/training stack. Turtle2 deploy can opt into
-    ``relative_pose`` or ``absolute_pose`` action modes. Those pose-action
-    modes route actions through explicit pose-action wrappers, skip teleop and
-    gripper-close wrappers, and differ only in frame handling:
-    ``relative_pose`` may use ``DualRelativeFrame`` while ``absolute_pose``
-    stays in the base frame before converting observations to euler angles.
-    Master takeover is only valid for absolute pose deploy actions.
     """
-    action_mode = cfg.get("action_mode", "delta_axis_angle")
-    if action_mode not in {"delta_axis_angle", "relative_pose", "absolute_pose"}:
-        raise ValueError(
-            f"Unsupported action_mode={action_mode!r}. "
-            "Expected one of {'delta_axis_angle', 'relative_pose', 'absolute_pose'}."
-        )
-
-    use_master_takeover = cfg.get("use_master_takeover", False)
-    if use_master_takeover and action_mode != "absolute_pose":
-        raise ValueError(
-            "use_master_takeover=True requires action_mode='absolute_pose'. "
-            "Master takeover poses are absolute dual-arm 14D commands and cannot "
-            "be interpreted as relative_pose actions."
-        )
-
     if cfg.get("no_gripper", True):
         raise NotImplementedError(
-            "Dual-arm realworld wrappers require no_gripper=False. "
-            "Pose-action modes use 7D per-arm actions including gripper, "
-            "and delta_axis_angle mode does not have DualGripperCloseEnv yet."
+            "Dual-arm realworld wrappers require no_gripper=False."
         )
-
-    if action_mode == "relative_pose":
-        if cfg.get("use_spacemouse", False) or cfg.get("use_gello", False):
-            raise ValueError(
-                "Dual-arm pose-action modes do not support teleop wrappers. "
-                "Set use_spacemouse=False and use_gello=False."
-            )
-        env = DualRelativePoseActionWrapper(env)
-        if cfg.get("use_relative_frame", True):
-            env = DualRelativeFrame(env)
-        env = _apply_keyboard_reward(env, cfg.get("keyboard_reward_wrapper", None))
-        env = DualQuat2EulerWrapper(env)
-        return env
-
-    if action_mode == "absolute_pose":
-        if cfg.get("use_spacemouse", False) or cfg.get("use_gello", False):
-            raise ValueError(
-                "Dual-arm pose-action modes do not support teleop wrappers. "
-                "Set use_spacemouse=False and use_gello=False."
-            )
-        env = DualAbsolutePoseActionWrapper(env)
-        if use_master_takeover:
-            env = MasterTakeoverIntervention(
-                env, config=cfg.get("master_takeover", None)
-            )
-            env = _apply_keyboard_running_mode(
-                env, cfg.get("keyboard_running_mode", None)
-            )
-        env = _apply_keyboard_reward(env, cfg.get("keyboard_reward_wrapper", None))
-        env = DualQuat2EulerWrapper(env)
-        return env
 
     use_spacemouse = cfg.get("use_spacemouse", True)
     use_gello = cfg.get("use_gello", False)

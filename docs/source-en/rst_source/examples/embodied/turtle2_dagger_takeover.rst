@@ -19,13 +19,14 @@ Runtime uses one robot execution path:
 
    OpenPI policy
       -> 14D absolute pose + gripper action
-      -> DualAbsolutePoseActionWrapper
+      -> Turtle2Env.step_absolute_pose
       -> MasterTakeoverIntervention
       -> Turtle2 hybrid pose control
       -> /follow_pos_cmd_1, /follow_pos_cmd_2
       -> CollectEpisode LeRobot export
 
-``MasterTakeoverIntervention`` only selects which action should be executed:
+``MasterTakeoverIntervention`` only selects which action should be executed on the
+Turtle2 local stack:
 
 - in normal mode, it passes through the policy action;
 - in takeover mode, when a fresh master pose is available, it replaces the
