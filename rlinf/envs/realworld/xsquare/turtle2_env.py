@@ -17,7 +17,7 @@ from __future__ import annotations
 import copy
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Literal, Optional
 
 import cv2
 import gymnasium as gym
@@ -80,6 +80,17 @@ class Turtle2RobotConfig:
     gripper_penalty: float = 0.1
     save_video_path: Optional[str] = None
 
+    # Deploy-aware opt-in fields. Defaults preserve the historical ButtonEnv
+    # behaviour: ``action_mode="relative_pose"`` routes ``step`` through the
+    # original (now ``_step_relative_pose``) body; ``expose_gripper_obs=False``
+    # keeps the observation dict unchanged; ``enable_task_reward=True`` keeps
+    # the task-success reward path active. These fields are only meant to be
+    # flipped by the Turtle2 deploy factory.
+    action_mode: Literal["relative_pose", "absolute_pose"] = "relative_pose"
+    task_description: str = ""
+    expose_gripper_obs: bool = False
+    enable_task_reward: bool = True
+
 
 class Turtle2Env(gym.Env):
     """Gymnasium environment wrapping the Turtle2 dual-arm robot.
@@ -105,6 +116,12 @@ class Turtle2Env(gym.Env):
         """
         self._logger = get_logger()
         self.config = config
+        # Pose-related config fields may arrive as plain Python lists (e.g.
+        # from YAML deploy configs). ``_init_action_obs_spaces`` slices them
+        # as ndarrays, so promote them here. The call is idempotent for
+        # callers that already supply ndarrays (e.g. ButtonEnvConfig), which
+        # keeps the ButtonEnv path byte-identical.
+        self._normalize_pose_arrays()
         self.hardware_info = hardware_info
         self.env_idx = env_idx
         self.node_rank = 0
@@ -127,6 +144,9 @@ class Turtle2Env(gym.Env):
 
         # Init action and observation spaces
         self._init_action_obs_spaces()
+        # Apply deploy-aware extensions (gripper obs key, absolute action
+        # space). For default ButtonEnv configs this is a no-op.
+        self._maybe_setup_deploy_spaces()
 
         if self.config.is_dummy:
             return
@@ -138,6 +158,89 @@ class Turtle2Env(gym.Env):
         # Init cameras
         self._check_cameras()
         # Video player for displaying camera frames
+
+    def _normalize_pose_arrays(self) -> None:
+        """Promote pose-related config fields to ``np.float64`` ndarrays.
+
+        ``np.asarray`` is identity for inputs that are already ndarrays, so
+        callers that pre-convert in their own ``__post_init__`` (notably
+        :class:`ButtonEnvConfig`) observe no behaviour change.
+        """
+        for name in (
+            "target_ee_pose",
+            "reset_ee_pose",
+            "reward_threshold",
+            "action_scale",
+            "ee_pose_limit_min",
+            "ee_pose_limit_max",
+        ):
+            setattr(
+                self.config,
+                name,
+                np.asarray(getattr(self.config, name), dtype=np.float64),
+            )
+
+    def _maybe_setup_deploy_spaces(self) -> None:
+        """Apply deploy-aware extensions to action / observation spaces.
+
+        ``expose_gripper_obs=True`` adds ``state.gripper`` as a separate key
+        (``tcp_pose`` is left untouched, so the shared
+        :class:`DualRelativeFrame` / :class:`DualQuat2EulerWrapper` chain
+        applies unchanged). ``action_mode="absolute_pose"`` replaces the
+        relative ``[-1, 1]`` action space with per-arm
+        ``[x, y, z, r, p, y, g]`` absolute bounds.
+
+        For configs that use the default values (e.g. ButtonEnv), this is a
+        no-op and ``_base_observation_space`` set by ``_init_action_obs_spaces``
+        is left intact.
+        """
+        space_changed = False
+        if self.config.expose_gripper_obs:
+            self.observation_space["state"]["gripper"] = gym.spaces.Box(
+                low=self.config.gripper_width_limit_min,
+                high=self.config.gripper_width_limit_max,
+                shape=(len(self.config.use_arm_ids),),
+                dtype=np.float64,
+            )
+            space_changed = True
+        if self.config.action_mode == "absolute_pose":
+            self.action_space = self._build_absolute_action_space()
+        if space_changed:
+            # Dummy ``_get_observation`` samples from this; refresh so the
+            # newly added gripper key is included in dummy observations.
+            self._base_observation_space = copy.deepcopy(self.observation_space)
+
+    def _build_absolute_action_space(self) -> gym.spaces.Box:
+        """Build the per-arm absolute-pose action space.
+
+        Action layout per arm: ``[x, y, z, roll, pitch, yaw, gripper]`` with
+        pose bounds from ``ee_pose_limit_min / max`` and gripper bounds from
+        ``gripper_width_limit_min / max``.
+        """
+        lows: list[np.ndarray] = []
+        highs: list[np.ndarray] = []
+        for arm_id in self.config.use_arm_ids:
+            lows.append(
+                np.concatenate(
+                    [
+                        self.config.ee_pose_limit_min[arm_id],
+                        np.array([self.config.gripper_width_limit_min]),
+                    ]
+                )
+            )
+            highs.append(
+                np.concatenate(
+                    [
+                        self.config.ee_pose_limit_max[arm_id],
+                        np.array([self.config.gripper_width_limit_max]),
+                    ]
+                )
+            )
+        return gym.spaces.Box(
+            low=np.concatenate(lows).astype(np.float32),
+            high=np.concatenate(highs).astype(np.float32),
+            dtype=np.float32,
+        )
 
     def _setup_hardware(self):
         from .turtle2_smooth_controller import Turtle2SmoothController
@@ -336,7 +439,27 @@ class Turtle2Env(gym.Env):
         return action
 
     def step(self, action: np.ndarray) -> tuple[dict, float, bool, bool, dict]:
-        """Take a step in the environment.
+        """Dispatch to the per-mode step implementation.
+
+        Default ``action_mode="relative_pose"`` routes to
+        :meth:`_step_relative_pose`, whose body is the original Turtle2Env
+        step semantics (delta end-effector action). Deploy configs may set
+        ``action_mode="absolute_pose"`` to use :meth:`_step_absolute_pose`
+        (per-arm base-frame absolute pose target).
+        """
+        if self.config.action_mode == "relative_pose":
+            return self._step_relative_pose(action)
+        if self.config.action_mode == "absolute_pose":
+            return self._step_absolute_pose(action)
+        raise ValueError(
+            f"Unsupported action_mode={self.config.action_mode!r}. "
+            "Expected one of {'relative_pose', 'absolute_pose'}."
+        )
+
+    def _step_relative_pose(
+        self, action: np.ndarray
+    ) -> tuple[dict, float, bool, bool, dict]:
+        """Take a relative-pose step in the environment.
 
         Args:
             action: Delta end-effector action of shape ``(7,)`` for single arm
@@ -417,9 +540,77 @@ class Turtle2Env(gym.Env):
         truncated = self._num_steps >= self.config.max_num_steps
         return observation, reward, terminated, truncated, {}
 
+    def _step_absolute_pose(
+        self, action: np.ndarray
+    ) -> tuple[dict, float, bool, bool, dict]:
+        """Take an absolute-pose step in the environment.
+
+        Args:
+            action: Absolute end-effector action of shape
+                ``(len(use_arm_ids) * 7,)``, per-arm
+                ``[x, y, z, roll, pitch, yaw, gripper]`` in the base frame.
+
+        Returns:
+            Tuple of ``(observation, reward, terminated, truncated, info)``.
+            ``terminated`` is always ``False`` in absolute-pose mode (deploy
+            does not use task-success termination); ``truncated`` triggers on
+            ``max_num_steps``.
+        """
+        action_dim_per_arm = 7  # xyz(3) + rpy(3) + gripper(1)
+        pose_dim = 6
+        expected_shape = (len(self.config.use_arm_ids) * action_dim_per_arm,)
+        assert action.shape == expected_shape, (
+            f"Action shape must be {expected_shape}, but got {action.shape}."
+        )
+
+        start_time = time.time()
+        action = np.clip(action, self.action_space.low, self.action_space.high)
+        action = action.reshape(-1, action_dim_per_arm)
+
+        next_positions = {
+            0: self._turtle2_state.follow1_pos.copy(),
+            1: self._turtle2_state.follow2_pos.copy(),
+        }
+        for row, arm_id in zip(action, self.config.use_arm_ids, strict=False):
+            next_positions[arm_id][:pose_dim] = row[:pose_dim]
+            next_positions[arm_id][pose_dim] = row[pose_dim]
+
+        next_position = self._clip_position_to_safety_box(
+            np.stack([next_positions[0], next_positions[1]])
+        )
+
+        if not self.config.is_dummy:
+            self._controller.move_arm(
+                next_position[0].tolist(), next_position[1].tolist()
+            ).wait()
+        else:
+            self._turtle2_state.follow1_pos = next_position[0].copy()
+            self._turtle2_state.follow2_pos = next_position[1].copy()
+
+        self._num_steps += 1
+        step_time = time.time() - start_time
+        time.sleep(max(0, (1.0 / self.config.step_frequency) - step_time))
+
+        if not self.config.is_dummy:
+            self._turtle2_state = self._controller.get_state().wait()[0]
+        observation = self._get_observation()
+        reward = self._calc_step_reward(observation)
+        terminated = False
+        truncated = self._num_steps >= self.config.max_num_steps
+        return observation, reward, terminated, truncated, {}
+
     @property
     def num_steps(self):
         return self._num_steps
+
+    @property
+    def task_description(self) -> str:
+        """Return the deploy task description (empty string by default).
+
+        Subclasses (e.g. ``ButtonEnv``) may override this with a task-specific
+        string; Python MRO ensures their override takes precedence.
+        """
+        return self.config.task_description
 
     def _calc_step_reward(
         self,
@@ -433,8 +624,12 @@ class Turtle2Env(gym.Env):
 
         Returns:
             ``1.0`` on success, a dense exponential reward when
-            ``use_dense_reward`` is set, or ``0.0`` otherwise.
+            ``use_dense_reward`` is set, or ``0.0`` otherwise. Returns
+            ``0.0`` unconditionally when ``enable_task_reward=False``
+            (e.g. for deploy configs that do not define a task reward).
         """
+        if not self.config.enable_task_reward:
+            return 0.0
         if not self.config.is_dummy:
             # Convert orientation to euler angles
             position1 = self._turtle2_state.follow1_pos[0:6]
@@ -553,6 +748,17 @@ class Turtle2Env(gym.Env):
             state = {
                 "tcp_pose": tcp_pose,
             }
+            # Deploy-aware: append gripper as a separate state key. ``tcp_pose``
+            # is left unchanged, so the shared dual-arm wrapper chain
+            # (``DualRelativeFrame`` / ``DualQuat2EulerWrapper``) applies
+            # without modification.
+            if self.config.expose_gripper_obs:
+                grippers: list[float] = []
+                if 0 in self.config.use_arm_ids:
+                    grippers.append(float(self._turtle2_state.follow1_pos[6]))
+                if 1 in self.config.use_arm_ids:
+                    grippers.append(float(self._turtle2_state.follow2_pos[6]))
+                state["gripper"] = np.array(grippers, dtype=np.float64)
             frames_dict = {}
             for k in range(len(self.config.use_camera_ids)):
                 frames_dict[f"wrist_{k + 1}"] = frames[k]
