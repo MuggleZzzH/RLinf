@@ -29,6 +29,10 @@ init_params:
 # after ``DualQuat2EulerWrapper`` — set actor.model.state_dim accordingly.
 override_cfg:
   is_dummy: false
+  # Deploy opt-in flags (also injected by the factory, but kept explicit here
+  # so reading this YAML alone makes the deploy contract clear).
+  expose_gripper_obs: true     # adds state.gripper as a separate obs key
+  enable_task_reward: false    # deploy does not compute task-success reward
   # action_mode selects the Turtle2 deploy control contract:
   #   relative_pose: 14D per-arm [dx, dy, dz, drx, dry, drz, dg] in EE frame
   #                  (transformed to base frame by DualRelativeFrame).

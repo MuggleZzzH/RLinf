@@ -27,9 +27,9 @@ from rlinf.envs.realworld.common.wrappers import (
 from rlinf.envs.realworld.xsquare.tasks.button_env import (
     ButtonEnv as ButtonEnv,
 )
-from rlinf.envs.realworld.xsquare.tasks.turtle2_deploy_env import (
-    Turtle2DeployConfig,
-    Turtle2DeployEnv,
+from rlinf.envs.realworld.xsquare.turtle2_env import (
+    Turtle2Env,
+    Turtle2RobotConfig,
 )
 
 
@@ -77,7 +77,21 @@ def create_turtle2_deploy_env(
       ``DualRelativeFrame`` step is required. The wrapper is an observation
       wrapper and does not modify actions.
     """
-    cfg = Turtle2DeployConfig(**override_cfg)
+    # Deploy-specific defaults are injected here rather than in
+    # ``Turtle2RobotConfig`` so that ButtonEnv (which also constructs the same
+    # config class) is unaffected. User overrides win via the trailing
+    # ``**override_cfg`` spread.
+    cfg_kwargs: dict[str, Any] = {
+        "use_arm_ids": [0, 1],
+        "use_camera_ids": [0, 1, 2],
+        "enforce_gripper_close": False,
+        "enable_gripper_penalty": False,
+        "use_dense_reward": False,
+        "expose_gripper_obs": True,
+        "enable_task_reward": False,
+        **override_cfg,
+    }
+    cfg = Turtle2RobotConfig(**cfg_kwargs)
     if cfg.action_mode not in {"relative_pose", "absolute_pose"}:
         raise ValueError(
             f"Unsupported Turtle2 deploy action_mode={cfg.action_mode!r}. "
@@ -89,7 +103,7 @@ def create_turtle2_deploy_env(
             f"got {list(cfg.use_arm_ids)!r}."
         )
 
-    env = Turtle2DeployEnv(
+    env = Turtle2Env(
         config=cfg,
         worker_info=worker_info,
         hardware_info=hardware_info,
