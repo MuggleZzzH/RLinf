@@ -610,11 +610,9 @@ class OpenPi0ForCFGActionPrediction(BasePolicy, PI0Pytorch):
                     "left/right wrist views."
                 )
             processed_obs = {
-                "images": {
-                    "left_wrist_view": extra_view_images[:, 0],
-                    "face_view": env_obs["main_images"],
-                    "right_wrist_view": extra_view_images[:, 1],
-                },
+                "left_wrist_view": extra_view_images[:, 0],
+                "face_view": env_obs["main_images"],
+                "right_wrist_view": extra_view_images[:, 1],
                 "state": env_obs["states"],
                 "prompt": env_obs["task_descriptions"],
                 "task": env_obs["task_descriptions"],

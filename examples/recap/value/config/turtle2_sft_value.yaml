@@ -90,7 +90,7 @@ data:
   action_horizon: 10
   normalize_to_minus_one_zero: true
   include_next_obs: false
-  action_dim: 32  # X1 uses 32-dim action padding for OpenPI
+  action_dim: 14  # Physical action dim for turtle2
   robot_type: "turtle2"
   model_type: "pi0"
 
@@ -114,7 +114,7 @@ actor:
     gemma3_path: "/mnt/public/datasets/pretrained-checkpoints/gemma-3-270m"
     tokenizer_path: "/mnt/public/datasets/pretrained-checkpoints/gemma-3-270m"
     freeze_vlm: false
-    action_dim: 32
+    action_dim: 14
     action_horizon: 10
     image_keys: ["base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb"]
 
