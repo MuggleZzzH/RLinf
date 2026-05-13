@@ -320,6 +320,99 @@ After verifying the setup, start the real-world training experiment on the head 
 
    bash examples/embodiment/run_realworld_async.sh realworld_button_turtle2_sac_cnn
 
+
+Deployment
+----------
+
+For policy-only real-world rollout or evaluation, RLinf provides a generic
+Turtle2 deployment environment registered as ``Turtle2DeployEnv-v1``. The env
+fragment and the eval-only top-level config are:
+
+.. code-block:: text
+
+   examples/embodiment/config/env/realworld_turtle2_deploy.yaml
+   examples/embodiment/config/realworld_turtle2_deploy_eval.yaml
+
+Run the eval-only deploy config from the Ray head node:
+
+.. code-block:: bash
+
+   bash examples/embodiment/run_realworld_eval.sh realworld_turtle2_deploy_eval
+
+**Local observation / action contract** (Turtle2 deploy only — *not* a
+repo-wide convention):
+
+* ``obs.state.tcp_pose`` raw env output is ``(14,)`` dual-arm ``xyz + quat``
+  in the base frame. After ``DualQuat2EulerWrapper`` it becomes ``(12,)``
+  ``xyz + rpy``.
+* ``obs.state.gripper`` is ``(2,)`` dual-arm gripper width, passed through
+  by all wrappers (``tcp_pose`` never contains the gripper channel).
+* ``RealWorldEnv._wrap_obs`` concatenates state keys alphabetically, so the
+  flattened ``obs["states"]`` order is ``gripper(2) + tcp_pose(12) = 14``.
+  Set ``actor.model.state_dim: 14`` and split the flat vector accordingly
+  on the policy side.
+* Action is ``(14,)`` for both modes:
+
+  - ``relative_pose`` (default): per-arm
+    ``[dx, dy, dz, drx, dry, drz, dg]`` in the EE frame; the shared
+    ``DualRelativeFrame`` wrapper transforms the 6D motion to the base
+    frame before the env executes it (training contract is preserved).
+  - ``absolute_pose``: per-arm ``[x, y, z, rx, ry, rz, g]`` in the base
+    frame, executed directly by the smooth controller. The wrapper chain
+    in this mode does **not** apply ``DualRelativeFrame``; it still
+    applies ``DualQuat2EulerWrapper`` for observations only (the wrapper
+    is an observation wrapper and does not modify actions).
+
+Set ``override_cfg.action_mode: absolute_pose`` only when the deployed
+policy emits absolute pose commands; otherwise keep the default
+``relative_pose``. Configs should set ``action_mode`` under
+``override_cfg`` only — the factory does not read a top-level
+``action_mode`` key.
+
+A minimal eval config skeleton:
+
+.. code-block:: yaml
+
+   defaults:
+     - env/realworld_turtle2_deploy@env.eval
+     - model/cnn_policy@actor.model
+     - training_backend/fsdp@actor.fsdp_config
+     - weight_syncer/patch_syncer@weight_syncer
+     - override hydra/job_logging: stdout
+
+   env:
+     eval:
+       override_cfg:
+         action_mode: relative_pose
+         task_description: "Describe your Turtle2 deployment task here."
+         is_dummy: false
+         use_arm_ids: [0, 1]
+         use_camera_ids: [0, 1, 2]
+
+.. note::
+
+   On the Turtle2 controller node we recommend a **dual-container split**
+   to reduce ROS ownership conflicts:
+
+   - The **control container** (for example, the vendor-provided Turtle2
+     control container such as ``turtle2_release``) owns the ROS master,
+     UI, low-level bring-up, and the camera / arm control nodes.
+   - A **separate RLinf container** only runs RLinf and the Ray worker,
+     and should not directly own ``roscore``, the UI, or ``run.sh``.
+
+   The RLinf container should be built from an image configuration that
+   is **compatible with the control container** — ideally sharing the same
+   base image, system dependencies, ROS runtime, and required mounts,
+   while only adding the RLinf Python environment and code on top. A
+   common setup is to run both containers with ``host network`` so they
+   share the controller node's network namespace; the RLinf container can
+   then connect to the existing ROS master rather than starting another
+   control plane. During training or evaluation, open the UI only
+   temporarily for calibration in the control container, then close it
+   before running RLinf, to avoid multiple processes publishing to the
+   same arm-control topics.
+
+
 Visualization and Results
 --------------------------
 
