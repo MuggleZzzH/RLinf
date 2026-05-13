@@ -1,0 +1,50 @@
+env_type: realworld
+
+total_num_envs: 1
+
+auto_reset: False
+ignore_terminations: False
+reward_mode: raw
+wrap_obs_mode: simple
+seed: 0
+group_size: 1
+use_fixed_reset_state_ids: False
+max_steps_per_rollout_epoch: 300
+max_episode_steps: 300
+no_gripper: False
+main_image_key: wrist_2
+
+video_cfg:
+  save_video: False
+  info_on_video: True
+  video_base_dir: ${runner.logger.log_path}/video/eval
+
+init_params:
+  id: "Turtle2DeployEnv-v1"
+  num_envs: null
+
+# Turtle2 deploy is dual-arm only and exposes ``state.gripper`` separately
+# from ``state.tcp_pose``. The flattened ``obs["states"]`` produced by
+# ``RealWorldEnv._wrap_obs`` is alphabetical, i.e. ``gripper(2) + tcp_pose(12)``
+# after ``DualQuat2EulerWrapper`` — set actor.model.state_dim accordingly.
+override_cfg:
+  is_dummy: false
+  # action_mode selects the Turtle2 deploy control contract:
+  #   relative_pose: 14D per-arm [dx, dy, dz, drx, dry, drz, dg] in EE frame
+  #                  (transformed to base frame by DualRelativeFrame).
+  #   absolute_pose: 14D per-arm [x, y, z, rx, ry, rz, g] in base frame,
+  #                  executed directly by the smooth controller.
+  action_mode: relative_pose
+  task_description: "Describe your Turtle2 deployment task here."
+  use_arm_ids: [0, 1]
+  use_camera_ids: [0, 1, 2]
+  max_num_steps: 300
+  reset_ee_pose:
+    - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]
+    - [0.20, 0.00, 0.10, 0.00, 0.00, 0.00]
+  ee_pose_limit_min:
+    - [-0.20, -0.60, -0.05, -3.20, -3.20, -3.20]
+    - [-0.20, -0.60, -0.05, -3.20, -3.20, -3.20]
+  ee_pose_limit_max:
+    - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
+    - [0.80, 0.60, 0.60, 3.20, 3.20, 3.20]
