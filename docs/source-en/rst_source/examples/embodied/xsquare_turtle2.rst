@@ -325,19 +325,36 @@ Deployment
 ----------
 
 For policy-only real-world rollout or evaluation, RLinf provides a generic
-Turtle2 deployment environment registered as ``Turtle2DeployEnv-v1``. The env
-fragment and the eval-only top-level config are:
+Turtle2 deployment environment registered as ``Turtle2DeployEnv-v1``. The
+new piece this PR adds is the env fragment:
 
 .. code-block:: text
 
    examples/embodiment/config/env/realworld_turtle2_deploy.yaml
-   examples/embodiment/config/realworld_turtle2_deploy_eval.yaml
 
-Run the eval-only deploy config from the Ray head node:
+Deploy varies widely by policy / algorithm / checkpoint, so this PR does
+**not** ship a complete top-level eval config. Instead, integrate the
+fragment into the existing eval config you already use (e.g. copy from
+``examples/embodiment/config/realworld_eval.yaml``) by swapping the env
+default and aligning the state / action dimensions:
+
+.. code-block:: yaml
+
+   defaults:
+     # ... your existing model / training_backend / weight_syncer defaults ...
+     - env/realworld_turtle2_deploy@env.eval
+
+   actor:
+     model:
+       # Flattened obs is alphabetical: gripper(2) + tcp_pose(12) = 14.
+       state_dim: 14
+       action_dim: 14
+
+Then launch with your standard eval driver:
 
 .. code-block:: bash
 
-   bash examples/embodiment/run_realworld_eval.sh realworld_turtle2_deploy_eval
+   bash examples/embodiment/run_realworld_eval.sh <your_eval_config_name>
 
 **Local observation / action contract** (Turtle2 deploy only — *not* a
 repo-wide convention):
@@ -368,26 +385,6 @@ policy emits absolute pose commands; otherwise keep the default
 ``relative_pose``. Configs should set ``action_mode`` under
 ``override_cfg`` only — the factory does not read a top-level
 ``action_mode`` key.
-
-A minimal eval config skeleton:
-
-.. code-block:: yaml
-
-   defaults:
-     - env/realworld_turtle2_deploy@env.eval
-     - model/cnn_policy@actor.model
-     - training_backend/fsdp@actor.fsdp_config
-     - weight_syncer/patch_syncer@weight_syncer
-     - override hydra/job_logging: stdout
-
-   env:
-     eval:
-       override_cfg:
-         action_mode: relative_pose
-         task_description: "Describe your Turtle2 deployment task here."
-         is_dummy: false
-         use_arm_ids: [0, 1]
-         use_camera_ids: [0, 1, 2]
 
 .. note::
 
